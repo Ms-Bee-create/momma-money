@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<title>Momma Money</title>
+<style>
+  :root{
+    --green:#1f6b4a; --green-dark:#164f37; --green-light:#e4f0e9;
+    --gold:#d4a017; --gold-dark:#a97e0f; --gold-light:#faf1d9;
+    --cream:#fbf7ee; --panel:#ffffff; --border:#e6ddc9;
+    --text:#2c2a24; --text-dim:#7a7568; --red:#b3423a; --red-light:#fbe7e5;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--cream);color:var(--text);-webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:520px;margin:0 auto;padding:20px 18px 100px;min-height:100vh;}
+  header.app-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;}
+  header.app-header h1{font-size:1.4rem;margin:0;color:var(--green-dark);}
+  header.app-header h1 .dot{color:var(--gold);}
+  .icon-btn{
+    border:none;background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:8px 12px;font-size:1.1rem;cursor:pointer;
+  }
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:18px;margin-bottom:16px;}
+  .kicker{font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--gold-dark);margin-bottom:6px;}
+  h2{margin:0 0 10px;font-size:1.15rem;}
+
+  /* Profile picker */
+  .profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px;}
+  .profile-card{
+    border-radius:20px;border:2px solid var(--border);background:var(--panel);
+    padding:20px 10px;display:flex;flex-direction:column;align-items:center;gap:8px;
+    cursor:pointer;font:inherit;font-weight:700;color:var(--text);
+  }
+  .profile-card .avatar{font-size:2.4rem;}
+  .profile-card .bal{font-size:0.8rem;color:var(--text-dim);font-weight:600;}
+  .profile-card.banker{border-color:var(--gold);background:var(--gold-light);}
+  .profile-card.bankrupt{border-color:var(--red);}
+  .profile-card.bankrupt .bal{color:var(--red);}
+  .add-member-card{
+    border-radius:20px;border:2px dashed var(--border);background:none;
+    padding:20px 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+    cursor:pointer;color:var(--text-dim);font:inherit;font-weight:700;min-height:110px;
+  }
+
+  /* Pin pad */
+  .pin-dots{display:flex;gap:12px;justify-content:center;margin:18px 0;}
+  .pin-dots span{width:14px;height:14px;border-radius:50%;border:2px solid var(--border);}
+  .pin-dots span.filled{background:var(--green);border-color:var(--green);}
+  .pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:260px;margin:0 auto;}
+  .pin-pad button{
+    padding:16px;font-size:1.2rem;border-radius:14px;border:1px solid var(--border);
+    background:var(--panel);cursor:pointer;font-weight:700;
+  }
+  .pin-pad button:active{background:var(--green-light);}
+
+  /* Balance / wallet */
+  .balance-hero{
+    background:linear-gradient(135deg,var(--green),var(--green-dark));color:#fff;
+    border-radius:20px;padding:22px;text-align:center;margin-bottom:18px;
+  }
+  .balance-hero .label{font-size:0.78rem;opacity:0.85;text-transform:uppercase;letter-spacing:.05em;font-weight:700;}
+  .balance-hero .amount{font-size:2.6rem;font-weight:800;margin:4px 0;}
+  .balance-hero .bankrupt-tag{
+    display:inline-block;background:var(--red);color:#fff;font-size:0.75rem;font-weight:700;
+    padding:4px 10px;border-radius:999px;margin-top:6px;
+  }
+
+  .tab-row{display:flex;gap:8px;margin-bottom:16px;overflow-x:auto;}
+  .tab-btn{
+    flex-shrink:0;padding:9px 16px;border-radius:999px;border:1px solid var(--border);
+    background:var(--panel);font:inherit;font-size:0.85rem;font-weight:700;color:var(--text-dim);cursor:pointer;
+  }
+  .tab-btn.active{background:var(--green);border-color:var(--green);color:#fff;}
+
+  .cat-label{font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);margin:16px 0 8px;}
+  .item-row{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin-bottom:8px;
+  }
+  .item-row .title{font-weight:700;font-size:0.92rem;}
+  .item-row .sub{font-size:0.76rem;color:var(--text-dim);margin-top:2px;}
+  .item-row .price{font-weight:800;color:var(--green-dark);white-space:nowrap;}
+  .item-row .price.cost{color:var(--gold-dark);}
+  .pill-btn{
+    flex-shrink:0;border:none;background:var(--green);color:#fff;font:inherit;font-weight:700;
+    font-size:0.8rem;padding:8px 14px;border-radius:999px;cursor:pointer;
+  }
+  .pill-btn.gold{background:var(--gold);color:#3a2b05;}
+  .pill-btn.outline{background:none;border:1px solid var(--border);color:var(--text);}
+  .pill-btn:disabled{opacity:0.4;cursor:not-allowed;}
+  .pill-btn.small{padding:6px 10px;font-size:0.72rem;}
+  .status-tag{
+    font-size:0.7rem;font-weight:700;padding:3px 9px;border-radius:999px;text-transform:uppercase;
+  }
+  .status-tag.pending{background:var(--gold-light);color:var(--gold-dark);}
+  .status-tag.submitted{background:#e0eefc;color:#1a5c9c;}
+  .status-tag.approved{background:var(--green-light);color:var(--green-dark);}
+
+  .empty-note{color:var(--text-dim);font-size:0.85rem;text-align:center;padding:20px 0;}
+
+  /* Overlays */
+  .overlay{
+    position:fixed;inset:0;background:rgba(30,25,10,0.45);display:flex;align-items:flex-end;
+    opacity:0;pointer-events:none;transition:opacity .15s;z-index:50;
+  }
+  .overlay.open{opacity:1;pointer-events:auto;}
+  .sheet{
+    background:var(--cream);width:100%;max-width:520px;margin:0 auto;border-radius:22px 22px 0 0;
+    padding:22px 18px 28px;max-height:88vh;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  }
+  .sheet-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+  .sheet-header h2{margin:0;}
+  .sheet-close{background:none;border:none;font-size:1.4rem;color:var(--text-dim);cursor:pointer;line-height:1;}
+
+  label.field-label{display:block;font-size:0.78rem;font-weight:700;color:var(--text-dim);margin:14px 0 6px;}
+  input[type="text"], input[type="number"], select{
+    width:100%;font:inherit;font-size:0.92rem;padding:11px 12px;border-radius:12px;
+    border:1px solid var(--border);background:var(--panel);color:var(--text);
+  }
+  .choice-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;}
+  .choice-chip{
+    padding:8px 14px;border-radius:999px;border:1px solid var(--border);background:var(--panel);
+    font:inherit;font-size:0.82rem;font-weight:700;color:var(--text-dim);cursor:pointer;
+  }
+  .choice-chip.selected{background:var(--green);border-color:var(--green);color:#fff;}
+  .primary-btn{
+    width:100%;margin-top:18px;padding:14px;border:none;border-radius:14px;background:var(--green);
+    color:#fff;font:inherit;font-weight:800;font-size:0.95rem;cursor:pointer;
+  }
+  .primary-btn:disabled{opacity:0.45;cursor:not-allowed;}
+
+  .toast{
+    position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--green-dark);
+    color:#fff;padding:11px 18px;border-radius:999px;font-size:0.85rem;font-weight:600;
+    opacity:0;pointer-events:none;transition:all .25s;z-index:80;white-space:nowrap;
+  }
+  .toast.show{opacity:1;transform:translate(-50%,0);}
+
+  .member-row{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin-bottom:8px;
+  }
+  .member-row .who{display:flex;align-items:center;gap:10px;}
+  .member-row .who .avatar{font-size:1.6rem;}
+  .member-row .who .name{font-weight:700;}
+  .member-row .who .status{font-size:0.75rem;color:var(--text-dim);}
+</style>
+</head>
+<body>
+
+<div class="wrap" id="app"></div>
+
+<div class="toast" id="toast">Saved</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  // ===========================================================================
+  // Supabase — one anonymous identity per household device, same model as
+  // Cracks. Kids don't get their own Supabase Auth account; profile switching
+  // inside the app (with an optional PIN) is the access boundary for them.
+  // ===========================================================================
+  const SUPABASE_URL = "https://fbrnxuargsilbyyjrjop.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZicm54dWFyZ3NpbGJ5eWpyam9wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1MDkxMDksImV4cCI6MjEwNTA4NTEwOX0.ycBWWu9U5H-KcZWdGGzFonGXxiSvlkDOYdCN_xtC47o";
+
+  let supa = null, userId = null, remoteReady = false;
+
+  function showToast(msg){
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => t.classList.remove("show"), 2200);
+  }
+
+  async function initSupabase(){
+    try{
+      supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      let { data: { session } } = await supa.auth.getSession();
+      if(!session){
+        const { data, error } = await supa.auth.signInAnonymously();
+        if(error) throw error;
+        session = data.session;
+      }
+      userId = session.user.id;
+      remoteReady = true;
+    }catch(e){
+      console.warn("Supabase unavailable, running local-only:", e);
+      remoteReady = false;
+    }
+  }
+
+  async function fetchAll(){
+    const [
+      { data: members }, { data: chores }, { data: rules }, { data: logs },
+      { data: fines }, { data: rewards }, { data: txns }
+    ] = await Promise.all([
+      supa.from("members").select("*").eq("household_id", userId).eq("archived", false).order("created_at"),
+      supa.from("chore_templates").select("*").eq("household_id", userId).eq("archived", false).order("category"),
+      supa.from("assignment_rules").select("*").eq("household_id", userId).eq("active", true),
+      supa.from("chore_logs").select("*").eq("household_id", userId).order("due_date", { ascending: false }),
+      supa.from("fine_templates").select("*").eq("household_id", userId).eq("archived", false),
+      supa.from("reward_items").select("*").eq("household_id", userId).eq("archived", false).order("category"),
+      supa.from("transactions").select("*").eq("household_id", userId).order("created_at", { ascending: false }).limit(200)
+    ]);
+    return {
+      members: members || [], chores: chores || [], rules: rules || [], logs: logs || [],
+      fines: fines || [], rewards: rewards || [], txns: txns || []
+    };
+  }
+
+  // ===========================================================================
+  // Local state — hydrated from Supabase, re-rendered on every mutation.
+  // No offline fallback here (unlike Cracks): this app is meaningless without
+  // shared server state since multiple household members read/write it.
+  // ===========================================================================
+  let state = {
+    members: [], chores: [], rules: [], logs: [], fines: [], rewards: [], txns: [],
+    activeMemberId: null, view: "picker", kidTab: "chores",
+    pinBuffer: "", pinTargetMember: null
+  };
+
+  async function reload(){
+    Object.assign(state, await fetchAll());
+    render();
+  }
+
+  function member(id){ return state.members.find(m => m.id === id); }
+  function activeMember(){ return member(state.activeMemberId); }
+  function enterProfile(m){
+    state.activeMemberId = m.id;
+    state.view = "home";
+    state.kidTab = m.role === "banker" ? "approvals" : "chores";
+  }
+  function fmt(n){ return "$" + Number(n || 0).toFixed(2); }
+
+  // ===========================================================================
+  // Mutations
+  // ===========================================================================
+  async function approveTransaction(txn){
+    const m = member(txn.member_id);
+    if(!m) return;
+    let newBalance = Number(m.current_balance) + Number(txn.amount);
+    let bankrupt = m.bankrupt;
+    if(newBalance <= 0 && txn.amount < 0){ newBalance = 0; bankrupt = true; }
+    if(newBalance > 0 && txn.amount > 0) bankrupt = false;
+    await supa.from("transactions").update({ status: "approved", resolved_at: new Date().toISOString() }).eq("id", txn.id);
+    await supa.from("members").update({ current_balance: newBalance, bankrupt }).eq("id", m.id);
+    if(txn.chore_log_id){
+      await supa.from("chore_logs").update({ status: "approved", approved_at: new Date().toISOString() }).eq("id", txn.chore_log_id);
+    }
+    showToast(`Approved — ${m.name}'s new balance ${fmt(newBalance)}`);
+    reload();
+  }
+
+  async function rejectTransaction(txn){
+    await supa.from("transactions").update({ status: "rejected", resolved_at: new Date().toISOString() }).eq("id", txn.id);
+    if(txn.chore_log_id){
+      await supa.from("chore_logs").update({ status: "rejected" }).eq("id", txn.chore_log_id);
+    }
+    showToast("Request declined");
+    reload();
+  }
+
+  async function submitChore(chore, memberId){
+    await supa.from("transactions").insert({
+      household_id: userId, member_id: memberId, type: "earn",
+      amount: chore.default_payout, description: chore.title, status: "pending"
+    });
+    showToast(`Submitted "${chore.title}" for approval`);
+    reload();
+  }
+
+  async function requestReward(item, memberId){
+    await supa.from("transactions").insert({
+      household_id: userId, member_id: memberId, type: "spend",
+      amount: -Math.abs(item.cost), description: item.title, status: "pending", reward_item_id: item.id
+    });
+    showToast(`Requested "${item.title}" — waiting on the Banker`);
+    reload();
+  }
+
+  async function issueFine(fine, memberId, customTitle, customAmount){
+    const m = member(memberId);
+    const amount = -Math.abs(customAmount != null ? customAmount : fine.amount);
+    const title = customTitle || fine.title;
+    const { data } = await supa.from("transactions").insert({
+      household_id: userId, member_id: memberId, type: "fine",
+      amount, description: title, status: "pending"
+    }).select().single();
+    if(data) await approveTransaction(data);
+  }
+
+  async function assignChore(chore, memberId){
+    let { data: rule } = await supa.from("assignment_rules").insert({
+      household_id: userId, chore_id: chore.id, assigned_member_id: memberId,
+      frequency_type: "interval", interval_days: 0
+    }).select().single();
+    await supa.from("chore_logs").insert({
+      household_id: userId, assignment_rule_id: rule.id, assigned_member_id: memberId,
+      due_date: new Date().toISOString().slice(0,10), status: "pending"
+    });
+    showToast(`Assigned "${chore.title}"`);
+    reload();
+  }
+
+  async function markChoreDone(log){
+    await supa.from("chore_logs").update({ status: "submitted", submitted_at: new Date().toISOString() }).eq("id", log.id);
+    const rule = state.rules.find(r => r.id === log.assignment_rule_id);
+    const chore = rule && state.chores.find(c => c.id === rule.chore_id);
+    await supa.from("transactions").insert({
+      household_id: userId, member_id: log.assigned_member_id, type: "earn",
+      amount: chore ? chore.default_payout : 0, description: chore ? chore.title : "Assigned chore",
+      status: "pending", chore_log_id: log.id
+    });
+    showToast("Marked done — waiting on the Banker");
+    reload();
+  }
+
+  async function addMember(name, role, emoji, pin){
+    await supa.from("members").insert({ household_id: userId, name, role, avatar_emoji: emoji, pin: pin || null });
+    showToast(`${name} added`);
+    reload();
+  }
+
+  // ===========================================================================
+  // Rendering
+  // ===========================================================================
+  const app = document.getElementById("app");
+
+  function render(){
+    if(state.view === "picker") return renderPicker();
+    if(state.view === "pin") return renderPinPad();
+    const m = activeMember();
+    if(!m){ state.view = "picker"; return renderPicker(); }
+    if(m.role === "banker") return renderBankerDesk();
+    return renderKidHome();
+  }
+
+  function switchProfileHeader(){
+    return `<header class="app-header">
+      <h1>Momma<span class="dot"> $</span></h1>
+      <button class="icon-btn" id="switchProfileBtn">🔁 Switch</button>
+    </header>`;
+  }
+
+  function renderPicker(){
+    const kids = state.members.filter(m => m.role === "kid");
+    const banker = state.members.find(m => m.role === "banker");
+    let cards = "";
+    if(banker){
+      cards += `<button class="profile-card banker" data-id="${banker.id}">
+        <span class="avatar">${banker.avatar_emoji}</span>${escapeHtml(banker.name)}
+        <span class="bal">Banker</span>
+      </button>`;
+    }
+    kids.forEach(k => {
+      cards += `<button class="profile-card${k.bankrupt ? " bankrupt" : ""}" data-id="${k.id}">
+        <span class="avatar">${k.avatar_emoji}</span>${escapeHtml(k.name)}
+        <span class="bal">${k.bankrupt ? "Bankrupt" : fmt(k.current_balance)}</span>
+      </button>`;
+    });
+    cards += `<button class="add-member-card" id="addMemberBtn">＋<br/>Add family member</button>`;
+
+    app.innerHTML = `
+      <header class="app-header"><h1>Momma<span class="dot"> $</span></h1></header>
+      <div class="kicker">Who's using the app?</div>
+      <h2>Pick your profile</h2>
+      <div class="profile-grid">${cards}</div>
+    `;
+    app.querySelectorAll(".profile-card[data-id]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const m = member(btn.dataset.id);
+        if(m.pin){
+          state.pinTargetMember = m.id; state.pinBuffer = ""; state.view = "pin";
+        } else {
+          enterProfile(m);
+        }
+        render();
+      });
+    });
+    const addBtn = document.getElementById("addMemberBtn");
+    if(addBtn) addBtn.addEventListener("click", openAddMemberSheet);
+  }
+
+  function renderPinPad(){
+    const m = member(state.pinTargetMember);
+    const dots = [0,1,2,3].map(i => `<span class="${i < state.pinBuffer.length ? "filled" : ""}"></span>`).join("");
+    app.innerHTML = `
+      <header class="app-header"><h1>Momma<span class="dot"> $</span></h1></header>
+      <div class="kicker" style="text-align:center;">Enter PIN for ${escapeHtml(m.name)}</div>
+      <div class="pin-dots">${dots}</div>
+      <div class="pin-pad">
+        ${[1,2,3,4,5,6,7,8,9].map(n => `<button data-n="${n}">${n}</button>`).join("")}
+        <button data-n="back">←</button>
+        <button data-n="0">0</button>
+        <button data-n="cancel">✕</button>
+      </div>
+    `;
+    app.querySelectorAll(".pin-pad button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const n = btn.dataset.n;
+        if(n === "cancel"){ state.view = "picker"; render(); return; }
+        if(n === "back"){ state.pinBuffer = state.pinBuffer.slice(0,-1); render(); return; }
+        if(state.pinBuffer.length >= 4) return;
+        state.pinBuffer += n;
+        if(state.pinBuffer.length === 4){
+          if(state.pinBuffer === m.pin){
+            enterProfile(m);
+          } else {
+            showToast("Wrong PIN");
+            state.pinBuffer = "";
+          }
+        }
+        render();
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------- Kid home
+  function renderKidHome(){
+    const m = activeMember();
+    const myLogs = state.logs.filter(l => l.assigned_member_id === m.id && ["pending","submitted"].includes(l.status));
+    const myPendingTxns = state.txns.filter(t => t.member_id === m.id && t.status === "pending");
+
+    let body = "";
+    if(state.kidTab === "chores"){
+      if(!myLogs.length && !myPendingTxns.filter(t=>t.type==="earn"&&!t.chore_log_id).length){
+        body = `<div class="empty-note">No assigned chores right now. Check "Earn More" to log extra work.</div>`;
+      }
+      myLogs.forEach(log => {
+        const rule = state.rules.find(r => r.id === log.assignment_rule_id);
+        const chore = rule && state.chores.find(c => c.id === rule.chore_id);
+        body += `<div class="item-row">
+          <div><div class="title">${escapeHtml(chore ? chore.title : "Chore")}</div>
+          <div class="sub">${chore ? fmt(chore.default_payout) : ""} · due ${log.due_date}</div></div>
+          ${log.status === "pending"
+            ? `<button class="pill-btn" data-mark="${log.id}">Mark done</button>`
+            : `<span class="status-tag submitted">Submitted</span>`}
+        </div>`;
+      });
+    } else if(state.kidTab === "earn"){
+      const byCat = {};
+      state.chores.forEach(c => { (byCat[c.category] = byCat[c.category] || []).push(c); });
+      Object.keys(byCat).forEach(cat => {
+        body += `<div class="cat-label">${escapeHtml(cat)}</div>`;
+        byCat[cat].forEach(c => {
+          body += `<div class="item-row">
+            <div class="title">${escapeHtml(c.title)}</div>
+            <button class="pill-btn" data-earn="${c.id}">${fmt(c.default_payout)}</button>
+          </div>`;
+        });
+      });
+    } else if(state.kidTab === "shop"){
+      const byCat = {};
+      state.rewards.forEach(r => { (byCat[r.category] = byCat[r.category] || []).push(r); });
+      Object.keys(byCat).forEach(cat => {
+        body += `<div class="cat-label">${escapeHtml(cat)}</div>`;
+        byCat[cat].forEach(r => {
+          const afford = Number(m.current_balance) >= Number(r.cost) && !m.bankrupt;
+          body += `<div class="item-row">
+            <div class="title">${escapeHtml(r.title)}</div>
+            <button class="pill-btn gold" data-spend="${r.id}" ${afford ? "" : "disabled"}>${fmt(r.cost)}</button>
+          </div>`;
+        });
+      });
+    } else if(state.kidTab === "activity"){
+      const mine = state.txns.filter(t => t.member_id === m.id).slice(0, 30);
+      if(!mine.length) body = `<div class="empty-note">No activity yet.</div>`;
+      mine.forEach(t => {
+        body += `<div class="item-row">
+          <div><div class="title">${escapeHtml(t.description)}</div>
+          <div class="sub">${new Date(t.created_at).toLocaleDateString()}</div></div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="price ${t.amount < 0 ? "cost" : ""}">${t.amount < 0 ? "-" : "+"}${fmt(Math.abs(t.amount))}</span>
+            <span class="status-tag ${t.status}">${t.status}</span>
+          </div>
+        </div>`;
+      });
+    }
+
+    app.innerHTML = `
+      ${switchProfileHeader()}
+      <div class="balance-hero">
+        <div class="label">${escapeHtml(m.name)}'s balance</div>
+        <div class="amount">${fmt(m.current_balance)}</div>
+        ${m.bankrupt ? `<span class="bankrupt-tag">Bankruptcy Protection — do Community Service chores to clear it</span>` : ""}
+      </div>
+      <div class="tab-row">
+        <button class="tab-btn ${state.kidTab==="chores"?"active":""}" data-tab="chores">My Chores</button>
+        <button class="tab-btn ${state.kidTab==="earn"?"active":""}" data-tab="earn">Earn More</button>
+        <button class="tab-btn ${state.kidTab==="shop"?"active":""}" data-tab="shop">Shop</button>
+        <button class="tab-btn ${state.kidTab==="activity"?"active":""}" data-tab="activity">Activity</button>
+      </div>
+      ${body}
+    `;
+    wireKidHome();
+  }
+
+  function wireKidHome(){
+    document.getElementById("switchProfileBtn").addEventListener("click", () => { state.view = "picker"; render(); });
+    app.querySelectorAll("[data-tab]").forEach(btn => btn.addEventListener("click", () => { state.kidTab = btn.dataset.tab; render(); }));
+    app.querySelectorAll("[data-mark]").forEach(btn => btn.addEventListener("click", () => {
+      const log = state.logs.find(l => l.id === btn.dataset.mark);
+      markChoreDone(log);
+    }));
+    app.querySelectorAll("[data-earn]").forEach(btn => btn.addEventListener("click", () => {
+      const chore = state.chores.find(c => c.id === btn.dataset.earn);
+      submitChore(chore, state.activeMemberId);
+    }));
+    app.querySelectorAll("[data-spend]").forEach(btn => btn.addEventListener("click", () => {
+      const item = state.rewards.find(r => r.id === btn.dataset.spend);
+      requestReward(item, state.activeMemberId);
+    }));
+  }
+
+  // ------------------------------------------------------------- Banker desk
+  function renderBankerDesk(){
+    const pendingTxns = state.txns.filter(t => t.status === "pending");
+    let body = "";
+
+    if(state.kidTab === "approvals"){
+      if(!pendingTxns.length) body = `<div class="empty-note">All caught up — nothing waiting on approval.</div>`;
+      pendingTxns.forEach(t => {
+        const m = member(t.member_id);
+        body += `<div class="item-row">
+          <div><div class="title">${escapeHtml(m ? m.name : "?")} · ${escapeHtml(t.description)}</div>
+          <div class="sub">${t.type === "spend" ? "Purchase request" : "Chore submission"}</div></div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span class="price ${t.amount<0?"cost":""}">${t.amount<0?"-":"+"}${fmt(Math.abs(t.amount))}</span>
+            <button class="pill-btn small" data-approve="${t.id}">✓</button>
+            <button class="pill-btn small outline" data-reject="${t.id}">✕</button>
+          </div>
+        </div>`;
+      });
+    } else if(state.kidTab === "household"){
+      state.members.filter(m => m.role === "kid").forEach(k => {
+        body += `<div class="member-row">
+          <div class="who"><span class="avatar">${k.avatar_emoji}</span>
+            <div><div class="name">${escapeHtml(k.name)}</div>
+            <div class="status">${k.bankrupt ? "In Bankruptcy Protection" : "Active"}</div></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="price">${fmt(k.current_balance)}</span>
+            <button class="pill-btn small outline" data-assign="${k.id}">Assign chore</button>
+            <button class="pill-btn small" data-fine="${k.id}">Fine</button>
+          </div>
+        </div>`;
+      });
+      if(!state.members.filter(m=>m.role==="kid").length){
+        body += `<div class="empty-note">No kids added yet.</div>`;
+      }
+    }
+
+    app.innerHTML = `
+      ${switchProfileHeader()}
+      <div class="kicker">Banker's Desk</div>
+      <h2>Run the household</h2>
+      <div class="tab-row">
+        <button class="tab-btn ${state.kidTab==="approvals"?"active":""}" data-tab="approvals">Approvals${pendingTxns.length ? ` (${pendingTxns.length})` : ""}</button>
+        <button class="tab-btn ${state.kidTab==="household"?"active":""}" data-tab="household">Household</button>
+      </div>
+      ${body}
+    `;
+    if(state.kidTab !== "approvals" && state.kidTab !== "household") state.kidTab = "approvals";
+    wireBankerDesk();
+  }
+
+  function wireBankerDesk(){
+    document.getElementById("switchProfileBtn").addEventListener("click", () => { state.view = "picker"; render(); });
+    app.querySelectorAll("[data-tab]").forEach(btn => btn.addEventListener("click", () => { state.kidTab = btn.dataset.tab; render(); }));
+    app.querySelectorAll("[data-approve]").forEach(btn => btn.addEventListener("click", () => {
+      approveTransaction(state.txns.find(t => t.id === btn.dataset.approve));
+    }));
+    app.querySelectorAll("[data-reject]").forEach(btn => btn.addEventListener("click", () => {
+      rejectTransaction(state.txns.find(t => t.id === btn.dataset.reject));
+    }));
+    app.querySelectorAll("[data-fine]").forEach(btn => btn.addEventListener("click", () => openFineSheet(btn.dataset.fine)));
+    app.querySelectorAll("[data-assign]").forEach(btn => btn.addEventListener("click", () => openAssignSheet(btn.dataset.assign)));
+  }
+
+  // ------------------------------------------------------------------ Sheets
+  function openSheet(html, wireFn){
+    const overlay = document.createElement("div");
+    overlay.className = "overlay";
+    overlay.innerHTML = `<div class="sheet">${html}</div>`;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add("open"));
+    function close(){ overlay.classList.remove("open"); setTimeout(() => overlay.remove(), 150); }
+    overlay.addEventListener("click", (e) => { if(e.target === overlay) close(); });
+    const closeBtn = overlay.querySelector(".sheet-close");
+    if(closeBtn) closeBtn.addEventListener("click", close);
+    if(wireFn) wireFn(overlay, close);
+  }
+
+  function openAddMemberSheet(){
+    const emojis = ["🙂","👦","👧","🧒","👶","🦸","🐯","🌟"];
+    openSheet(`
+      <div class="sheet-header"><h2>Add family member</h2><button class="sheet-close">&times;</button></div>
+      <label class="field-label">Name</label>
+      <input type="text" id="mName" placeholder="Sally" />
+      <label class="field-label">Avatar</label>
+      <div class="choice-row">${emojis.map((e,i) => `<button class="choice-chip${i===0?" selected":""}" data-emoji="${e}">${e}</button>`).join("")}</div>
+      <label class="field-label">PIN (optional, 4 digits)</label>
+      <input type="text" id="mPin" maxlength="4" inputmode="numeric" placeholder="e.g. 1234" />
+      <button class="primary-btn" id="mSave">Add member</button>
+    `, (overlay, close) => {
+      let chosen = emojis[0];
+      overlay.querySelectorAll("[data-emoji]").forEach(chip => chip.addEventListener("click", () => {
+        overlay.querySelectorAll("[data-emoji]").forEach(c => c.classList.remove("selected"));
+        chip.classList.add("selected"); chosen = chip.dataset.emoji;
+      }));
+      overlay.querySelector("#mSave").addEventListener("click", () => {
+        const name = overlay.querySelector("#mName").value.trim();
+        if(!name) return;
+        const pin = overlay.querySelector("#mPin").value.trim();
+        addMember(name, "kid", chosen, pin.length === 4 ? pin : null);
+        close();
+      });
+    });
+  }
+
+  function openFineSheet(memberId){
+    const m = member(memberId);
+    openSheet(`
+      <div class="sheet-header"><h2>Issue fine — ${escapeHtml(m.name)}</h2><button class="sheet-close">&times;</button></div>
+      <div class="cat-label">Big Fines</div>
+      <div class="choice-row">${state.fines.filter(f=>f.tier==="Big").map(f => `<button class="choice-chip" data-fine-id="${f.id}">${escapeHtml(f.title)} · ${fmt(f.amount)}</button>`).join("")}</div>
+      <div class="cat-label">Medium Fines</div>
+      <div class="choice-row">${state.fines.filter(f=>f.tier==="Medium").map(f => `<button class="choice-chip" data-fine-id="${f.id}">${escapeHtml(f.title)} · ${fmt(f.amount)}</button>`).join("")}</div>
+      <div class="cat-label">Standard Fees</div>
+      <div class="choice-row">${state.fines.filter(f=>f.tier==="Standard").map(f => `<button class="choice-chip" data-fine-id="${f.id}">${escapeHtml(f.title)} · ${fmt(f.amount)}</button>`).join("")}</div>
+      <label class="field-label">Or a custom fine</label>
+      <input type="text" id="fTitle" placeholder="Reason" />
+      <input type="number" id="fAmount" placeholder="Amount" step="0.25" style="margin-top:8px;" />
+      <button class="primary-btn" id="fSave">Charge fine</button>
+    `, (overlay, close) => {
+      let selectedFine = null;
+      overlay.querySelectorAll("[data-fine-id]").forEach(chip => chip.addEventListener("click", () => {
+        overlay.querySelectorAll("[data-fine-id]").forEach(c => c.classList.remove("selected"));
+        chip.classList.add("selected");
+        selectedFine = state.fines.find(f => f.id === chip.dataset.fineId);
+        overlay.querySelector("#fTitle").value = selectedFine.title;
+        overlay.querySelector("#fAmount").value = selectedFine.amount;
+      }));
+      overlay.querySelector("#fSave").addEventListener("click", () => {
+        const title = overlay.querySelector("#fTitle").value.trim();
+        const amount = parseFloat(overlay.querySelector("#fAmount").value);
+        if(!title || !amount) return;
+        issueFine(selectedFine, memberId, title, amount).then(() => { showToast("Fine charged"); reload(); });
+        close();
+      });
+    });
+  }
+
+  function openAssignSheet(memberId){
+    const m = member(memberId);
+    const byCat = {};
+    state.chores.forEach(c => { (byCat[c.category] = byCat[c.category] || []).push(c); });
+    let list = "";
+    Object.keys(byCat).forEach(cat => {
+      list += `<div class="cat-label">${escapeHtml(cat)}</div>`;
+      byCat[cat].forEach(c => {
+        list += `<div class="item-row"><div class="title">${escapeHtml(c.title)}</div><button class="pill-btn small" data-chore="${c.id}">${fmt(c.default_payout)}</button></div>`;
+      });
+    });
+    openSheet(`
+      <div class="sheet-header"><h2>Assign chore — ${escapeHtml(m.name)}</h2><button class="sheet-close">&times;</button></div>
+      ${list}
+    `, (overlay, close) => {
+      overlay.querySelectorAll("[data-chore]").forEach(btn => btn.addEventListener("click", () => {
+        assignChore(state.chores.find(c => c.id === btn.dataset.chore), memberId);
+        close();
+      }));
+    });
+  }
+
+  function escapeHtml(s){
+    return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  }
+
+  // ===========================================================================
+  // Boot
+  // ===========================================================================
+  (async function boot(){
+    app.innerHTML = `<div class="empty-note">Loading Momma Money…</div>`;
+    await initSupabase();
+    if(!remoteReady){
+      app.innerHTML = `<div class="empty-note">Couldn't connect — check your internet connection and reload.</div>`;
+      return;
+    }
+    await reload();
+  })();
+})();
+</script>
+</body>
+</html>
