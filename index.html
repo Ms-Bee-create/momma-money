@@ -337,7 +337,10 @@
   // ===========================================================================
   const app = document.getElementById("app");
 
+  const SETUP_DONE_KEY = "mm_setup_done_v1";
+
   function render(){
+    if(state.view === "setup") return renderSetup();
     if(state.view === "picker") return renderPicker();
     if(state.view === "pin") return renderPinPad();
     const m = activeMember();
@@ -351,6 +354,88 @@
       <h1>Momma<span class="dot"> $</span></h1>
       <button class="icon-btn" id="switchProfileBtn">🔁 Switch</button>
     </header>`;
+  }
+
+  function renderSetup(){
+    const kids = state.members.filter(m => m.role === "kid");
+    const banker = state.members.find(m => m.role === "banker");
+    const emojis = ["🙂","👦","👧","🧒","👶","🦸","🐯","🌟"];
+
+    let kidsList = "";
+    kids.forEach(k => {
+      kidsList += `<div class="member-row">
+        <div class="who"><span class="avatar">${k.avatar_emoji}</span><div class="name">${escapeHtml(k.name)}${k.pin ? " · PIN set" : ""}</div></div>
+        <button class="pill-btn small outline" data-remove-kid="${k.id}">Remove</button>
+      </div>`;
+    });
+
+    app.innerHTML = `
+      <header class="app-header"><h1>Momma<span class="dot"> $</span></h1></header>
+      <div class="kicker">Welcome — let's set up your household</div>
+      <h2>Add your kids</h2>
+      <p style="color:var(--text-dim);font-size:0.88rem;line-height:1.5;margin:0 0 16px;">
+        Add every kid who'll use this app, with an optional PIN so whoever
+        picks up the tablet only ever sees their own wallet. You can add more
+        later too, from the header.
+      </p>
+      ${kidsList}
+      <div class="card" style="margin-top:${kids.length ? "12px" : "0"};">
+        <label class="field-label" style="margin-top:0;">Child's name</label>
+        <input type="text" id="setupKidName" placeholder="Sally" />
+        <label class="field-label">Avatar</label>
+        <div class="choice-row">${emojis.map((e,i) => `<button class="choice-chip${i===0?" selected":""}" data-emoji="${e}">${e}</button>`).join("")}</div>
+        <label class="field-label">PIN (optional, 4 digits)</label>
+        <input type="text" id="setupKidPin" maxlength="4" inputmode="numeric" placeholder="e.g. 1234" />
+        <button class="pill-btn" id="setupAddKidBtn" style="margin-top:14px;">+ Add this kid</button>
+      </div>
+
+      <div class="card">
+        <label class="field-label" style="margin-top:0;">Your Banker PIN — optional</label>
+        <input type="text" id="setupBankerPin" maxlength="4" inputmode="numeric" placeholder="e.g. 4321" value="${banker && banker.pin ? escapeHtml(banker.pin) : ""}" />
+      </div>
+
+      <button class="primary-btn" id="setupDoneBtn" ${kids.length ? "" : "disabled"}>Start managing →</button>
+      ${!kids.length ? `<div class="field-error-msg" style="text-align:center;">Add at least one kid to continue</div>` : ""}
+    `;
+    wireSetup();
+  }
+
+  function wireSetup(){
+    let chosenEmoji = "🙂";
+    document.querySelectorAll("[data-emoji]").forEach(chip => chip.addEventListener("click", () => {
+      document.querySelectorAll("[data-emoji]").forEach(c => c.classList.remove("selected"));
+      chip.classList.add("selected"); chosenEmoji = chip.dataset.emoji;
+    }));
+
+    const nameInput = document.getElementById("setupKidName");
+    nameInput.addEventListener("input", () => clearInvalid(nameInput));
+    document.getElementById("setupAddKidBtn").addEventListener("click", async () => {
+      const name = nameInput.value.trim();
+      if(!name){ markInvalid(nameInput, "Enter a name first"); return; }
+      const pinInput = document.getElementById("setupKidPin");
+      const pin = pinInput.value.trim();
+      if(pin.length > 0 && pin.length !== 4){ markInvalid(pinInput, "PIN must be exactly 4 digits"); return; }
+      await addMember(name, "kid", chosenEmoji, pin.length === 4 ? pin : null);
+    });
+
+    document.querySelectorAll("[data-remove-kid]").forEach(btn => btn.addEventListener("click", async () => {
+      await supa.from("members").update({ archived: true }).eq("id", btn.dataset.removeKid);
+      showToast("Removed");
+      reload();
+    }));
+
+    document.getElementById("setupDoneBtn").addEventListener("click", async () => {
+      const banker = state.members.find(m => m.role === "banker");
+      const pinInput = document.getElementById("setupBankerPin");
+      const pin = pinInput.value.trim();
+      if(pin.length > 0 && pin.length !== 4){ markInvalid(pinInput, "PIN must be exactly 4 digits"); return; }
+      if(banker) await supa.from("members").update({ pin: pin.length === 4 ? pin : null }).eq("id", banker.id);
+      try{ localStorage.setItem(SETUP_DONE_KEY, "1"); }catch(e){}
+      await reload();
+      const freshBanker = state.members.find(m => m.role === "banker");
+      if(freshBanker) enterProfile(freshBanker);
+      render();
+    });
   }
 
   function renderPicker(){
@@ -856,6 +941,16 @@
     if(!state.members.length){
       await new Promise(r => setTimeout(r, 800));
       await reload();
+    }
+    // First-run wizard: a household with no kids yet (and that hasn't
+    // finished setup on this device before) walks through adding kids and
+    // PINs before ever seeing the Banker's Desk, instead of landing on a
+    // bare profile picker with just "Banker" on it.
+    let setupDone = false;
+    try{ setupDone = !!localStorage.getItem(SETUP_DONE_KEY); }catch(e){}
+    if(!state.members.some(m => m.role === "kid") && !setupDone){
+      state.view = "setup";
+      render();
     }
   })();
 })();
