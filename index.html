@@ -696,6 +696,13 @@
       return;
     }
     await reload();
+    // First-ever visit: the new-household trigger seeds data right after
+    // sign-up, which can lose a race with this initial fetch. One short
+    // retry covers it without a visible loading state on every normal load.
+    if(!state.members.length){
+      await new Promise(r => setTimeout(r, 800));
+      await reload();
+    }
   })();
 })();
 </script>
