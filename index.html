@@ -596,6 +596,14 @@
     overlay.addEventListener("click", (e) => { if(e.target === overlay) close(); });
     const closeBtn = overlay.querySelector(".sheet-close");
     if(closeBtn) closeBtn.addEventListener("click", close);
+    // On phones, the keyboard can cover a focused field (or the button below
+    // it) inside a bottom sheet without the page itself needing to scroll —
+    // nudge the focused field into view once the keyboard has room to open.
+    overlay.querySelectorAll("input, select").forEach(el => {
+      el.addEventListener("focus", () => {
+        setTimeout(() => el.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
+      });
+    });
     if(wireFn) wireFn(overlay, close);
   }
 
