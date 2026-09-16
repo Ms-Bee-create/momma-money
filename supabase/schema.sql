@@ -236,7 +236,7 @@ begin
     (hh_id, 'Vacuum living room', 'Cleaning', 4),
     (hh_id, 'Help carry groceries', 'Cleaning', 2),
     (hh_id, 'Say one kind thing to your sibling', 'Care & Kindness', 1),
-    (hh_id, 'Help entertain Judah kindly', 'Care & Kindness', 3),
+    (hh_id, 'Help entertain your sibling kindly', 'Care & Kindness', 3),
     (hh_id, 'Help a sibling clean up', 'Care & Kindness', 3),
     (hh_id, 'Feed pets', 'Care & Kindness', 3),
     (hh_id, 'Change clothes', 'Hygiene', 1),

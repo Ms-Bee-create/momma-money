@@ -117,6 +117,8 @@
   .sheet-close{background:none;border:none;font-size:1.4rem;color:var(--text-dim);cursor:pointer;line-height:1;}
 
   label.field-label{display:block;font-size:0.78rem;font-weight:700;color:var(--text-dim);margin:14px 0 6px;}
+  .input-error{border-color:var(--red) !important;}
+  .field-error-msg{color:var(--red);font-size:0.78rem;margin-top:5px;}
   input[type="text"], input[type="number"], select{
     width:100%;font:inherit;font-size:0.92rem;padding:11px 12px;border-radius:12px;
     border:1px solid var(--border);background:var(--panel);color:var(--text);
@@ -522,6 +524,7 @@
 
   // ------------------------------------------------------------- Banker desk
   function renderBankerDesk(){
+    if(!["approvals","household","manage"].includes(state.kidTab)) state.kidTab = "approvals";
     const pendingTxns = state.txns.filter(t => t.status === "pending");
     let body = "";
 
@@ -556,6 +559,42 @@
       if(!state.members.filter(m=>m.role==="kid").length){
         body += `<div class="empty-note">No kids added yet.</div>`;
       }
+    } else if(state.kidTab === "manage"){
+      body += `<div class="cat-label">Chores</div>`;
+      state.chores.forEach(c => {
+        body += `<div class="item-row">
+          <div><div class="title">${escapeHtml(c.title)}</div><div class="sub">${escapeHtml(c.category)}</div></div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="price">${fmt(c.default_payout)}</span>
+            <button class="pill-btn small outline" data-edit-chore="${c.id}">Edit</button>
+          </div>
+        </div>`;
+      });
+      body += `<button class="pill-btn" id="addChoreBtn" style="margin:8px 0 22px;">+ Add chore</button>`;
+
+      body += `<div class="cat-label">Fines</div>`;
+      state.fines.forEach(f => {
+        body += `<div class="item-row">
+          <div><div class="title">${escapeHtml(f.title)}</div><div class="sub">${escapeHtml(f.tier)}</div></div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="price cost">${fmt(f.amount)}</span>
+            <button class="pill-btn small outline" data-edit-fine="${f.id}">Edit</button>
+          </div>
+        </div>`;
+      });
+      body += `<button class="pill-btn" id="addFineBtn" style="margin:8px 0 22px;">+ Add fine</button>`;
+
+      body += `<div class="cat-label">Rewards</div>`;
+      state.rewards.forEach(r => {
+        body += `<div class="item-row">
+          <div><div class="title">${escapeHtml(r.title)}</div><div class="sub">${escapeHtml(r.category)}</div></div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="price">${fmt(r.cost)}</span>
+            <button class="pill-btn small outline" data-edit-reward="${r.id}">Edit</button>
+          </div>
+        </div>`;
+      });
+      body += `<button class="pill-btn" id="addRewardBtn" style="margin:8px 0;">+ Add reward</button>`;
     }
 
     app.innerHTML = `
@@ -565,10 +604,10 @@
       <div class="tab-row">
         <button class="tab-btn ${state.kidTab==="approvals"?"active":""}" data-tab="approvals">Approvals${pendingTxns.length ? ` (${pendingTxns.length})` : ""}</button>
         <button class="tab-btn ${state.kidTab==="household"?"active":""}" data-tab="household">Household</button>
+        <button class="tab-btn ${state.kidTab==="manage"?"active":""}" data-tab="manage">Manage</button>
       </div>
       ${body}
     `;
-    if(state.kidTab !== "approvals" && state.kidTab !== "household") state.kidTab = "approvals";
     wireBankerDesk();
   }
 
@@ -583,6 +622,72 @@
     }));
     app.querySelectorAll("[data-fine]").forEach(btn => btn.addEventListener("click", () => openFineSheet(btn.dataset.fine)));
     app.querySelectorAll("[data-assign]").forEach(btn => btn.addEventListener("click", () => openAssignSheet(btn.dataset.assign)));
+    app.querySelectorAll("[data-edit-chore]").forEach(btn => btn.addEventListener("click", () => openCatalogSheet("chore", state.chores.find(c => c.id === btn.dataset.editChore))));
+    app.querySelectorAll("[data-edit-fine]").forEach(btn => btn.addEventListener("click", () => openCatalogSheet("fine", state.fines.find(f => f.id === btn.dataset.editFine))));
+    app.querySelectorAll("[data-edit-reward]").forEach(btn => btn.addEventListener("click", () => openCatalogSheet("reward", state.rewards.find(r => r.id === btn.dataset.editReward))));
+    const addChoreBtn = document.getElementById("addChoreBtn");
+    if(addChoreBtn) addChoreBtn.addEventListener("click", () => openCatalogSheet("chore", null));
+    const addFineBtn = document.getElementById("addFineBtn");
+    if(addFineBtn) addFineBtn.addEventListener("click", () => openCatalogSheet("fine", null));
+    const addRewardBtn = document.getElementById("addRewardBtn");
+    if(addRewardBtn) addRewardBtn.addEventListener("click", () => openCatalogSheet("reward", null));
+  }
+
+  // Shared config for the three editable catalogs (chores/fines/rewards) so
+  // one sheet + one save/archive path covers all three instead of three
+  // near-identical forms.
+  const CATALOG_CONFIG = {
+    chore: { table: "chore_templates", label: "Chore", categoryField: "category",
+      categoryOptions: ["Cleaning","Care & Kindness","Hygiene","Learning","Family Help","Finch"],
+      amountField: "default_payout", amountLabel: "Payout ($)" },
+    fine: { table: "fine_templates", label: "Fine", categoryField: "tier",
+      categoryOptions: ["Big","Medium","Standard"],
+      amountField: "amount", amountLabel: "Amount ($)" },
+    reward: { table: "reward_items", label: "Reward", categoryField: "category",
+      categoryOptions: ["Screen & Media","Food & Treats","Privileges & Fun","Tangible Rewards"],
+      amountField: "cost", amountLabel: "Cost ($)" }
+  };
+
+  function openCatalogSheet(kind, existing){
+    const cfg = CATALOG_CONFIG[kind];
+    const isEdit = !!existing;
+    openSheet(`
+      <div class="sheet-header"><h2>${isEdit ? "Edit" : "Add"} ${cfg.label}</h2><button class="sheet-close">&times;</button></div>
+      <label class="field-label">Title</label>
+      <input type="text" id="catTitle" value="${isEdit ? escapeHtml(existing.title) : ""}" />
+      <label class="field-label">Category</label>
+      <select id="catCategory">${cfg.categoryOptions.map(o => `<option value="${o}" ${isEdit && existing[cfg.categoryField] === o ? "selected" : ""}>${o}</option>`).join("")}</select>
+      <label class="field-label">${cfg.amountLabel}</label>
+      <input type="number" id="catAmount" step="0.25" value="${isEdit ? existing[cfg.amountField] : ""}" />
+      <button class="primary-btn" id="catSave">${isEdit ? "Save changes" : `Add ${cfg.label.toLowerCase()}`}</button>
+      ${isEdit ? `<button class="pill-btn outline" id="catArchive" style="width:100%;margin-top:10px;">Archive — remove from menu</button>` : ""}
+    `, (overlay, close) => {
+      const titleInput = overlay.querySelector("#catTitle");
+      const amountInput = overlay.querySelector("#catAmount");
+      titleInput.addEventListener("input", () => clearInvalid(titleInput));
+      amountInput.addEventListener("input", () => clearInvalid(amountInput));
+      overlay.querySelector("#catSave").addEventListener("click", async () => {
+        const title = titleInput.value.trim();
+        const category = overlay.querySelector("#catCategory").value;
+        const amount = parseFloat(amountInput.value);
+        if(!title){ markInvalid(titleInput, "Enter a title"); return; }
+        if(!amount || amount <= 0){ markInvalid(amountInput, "Enter an amount greater than $0"); return; }
+        const payload = { title, [cfg.categoryField]: category, [cfg.amountField]: amount };
+        if(isEdit){
+          await supa.from(cfg.table).update(payload).eq("id", existing.id);
+        } else {
+          await supa.from(cfg.table).insert(Object.assign({ household_id: userId }, payload));
+        }
+        showToast(`${cfg.label} ${isEdit ? "updated" : "added"}`);
+        close(); reload();
+      });
+      const archiveBtn = overlay.querySelector("#catArchive");
+      if(archiveBtn) archiveBtn.addEventListener("click", async () => {
+        await supa.from(cfg.table).update({ archived: true }).eq("id", existing.id);
+        showToast(`${cfg.label} archived`);
+        close(); reload();
+      });
+    });
   }
 
   // ------------------------------------------------------------------ Sheets
@@ -624,10 +729,13 @@
         overlay.querySelectorAll("[data-emoji]").forEach(c => c.classList.remove("selected"));
         chip.classList.add("selected"); chosen = chip.dataset.emoji;
       }));
+      const nameInput = overlay.querySelector("#mName");
+      nameInput.addEventListener("input", () => clearInvalid(nameInput));
       overlay.querySelector("#mSave").addEventListener("click", () => {
-        const name = overlay.querySelector("#mName").value.trim();
-        if(!name) return;
+        const name = nameInput.value.trim();
+        if(!name){ markInvalid(nameInput, "Enter a name first"); return; }
         const pin = overlay.querySelector("#mPin").value.trim();
+        if(pin.length > 0 && pin.length !== 4){ markInvalid(overlay.querySelector("#mPin"), "PIN must be exactly 4 digits"); return; }
         addMember(name, "kid", chosen, pin.length === 4 ? pin : null);
         close();
       });
@@ -657,10 +765,15 @@
         overlay.querySelector("#fTitle").value = selectedFine.title;
         overlay.querySelector("#fAmount").value = selectedFine.amount;
       }));
+      const fTitleInput = overlay.querySelector("#fTitle");
+      const fAmountInput = overlay.querySelector("#fAmount");
+      fTitleInput.addEventListener("input", () => clearInvalid(fTitleInput));
+      fAmountInput.addEventListener("input", () => clearInvalid(fAmountInput));
       overlay.querySelector("#fSave").addEventListener("click", () => {
-        const title = overlay.querySelector("#fTitle").value.trim();
-        const amount = parseFloat(overlay.querySelector("#fAmount").value);
-        if(!title || !amount) return;
+        const title = fTitleInput.value.trim();
+        const amount = parseFloat(fAmountInput.value);
+        if(!title){ markInvalid(fTitleInput, "Pick a fine above or enter a reason"); return; }
+        if(!amount || amount <= 0){ markInvalid(fAmountInput, "Enter an amount greater than $0"); return; }
         issueFine(selectedFine, memberId, title, amount).then(() => { showToast("Fine charged"); reload(); });
         close();
       });
@@ -687,6 +800,23 @@
         close();
       }));
     });
+  }
+
+  function markInvalid(inputEl, msg){
+    inputEl.classList.add("input-error");
+    let msgEl = inputEl.nextElementSibling;
+    if(!msgEl || !msgEl.classList.contains("field-error-msg")){
+      msgEl = document.createElement("div");
+      msgEl.className = "field-error-msg";
+      inputEl.after(msgEl);
+    }
+    msgEl.textContent = msg;
+    inputEl.focus();
+  }
+  function clearInvalid(inputEl){
+    inputEl.classList.remove("input-error");
+    const msgEl = inputEl.nextElementSibling;
+    if(msgEl && msgEl.classList.contains("field-error-msg")) msgEl.remove();
   }
 
   function escapeHtml(s){
