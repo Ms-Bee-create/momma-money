@@ -99,6 +99,7 @@
   .status-tag.pending{background:var(--gold-light);color:var(--gold-dark);}
   .status-tag.submitted{background:#e0eefc;color:#1a5c9c;}
   .status-tag.approved{background:var(--green-light);color:var(--green-dark);}
+  .status-tag.rejected{background:var(--red-light);color:var(--red);}
 
   .empty-note{color:var(--text-dim);font-size:0.85rem;text-align:center;padding:20px 0;}
 
@@ -524,7 +525,7 @@
 
   // ------------------------------------------------------------- Banker desk
   function renderBankerDesk(){
-    if(!["approvals","household","manage"].includes(state.kidTab)) state.kidTab = "approvals";
+    if(!["approvals","household","history","manage"].includes(state.kidTab)) state.kidTab = "approvals";
     const pendingTxns = state.txns.filter(t => t.status === "pending");
     let body = "";
 
@@ -559,6 +560,20 @@
       if(!state.members.filter(m=>m.role==="kid").length){
         body += `<div class="empty-note">No kids added yet.</div>`;
       }
+    } else if(state.kidTab === "history"){
+      const resolved = state.txns.filter(t => t.status !== "pending");
+      if(!resolved.length) body = `<div class="empty-note">Nothing's been approved or declined yet — it'll show up here once it happens.</div>`;
+      resolved.forEach(t => {
+        const m = member(t.member_id);
+        body += `<div class="item-row">
+          <div><div class="title">${escapeHtml(m ? m.name : "?")} · ${escapeHtml(t.description)}</div>
+          <div class="sub">${new Date(t.created_at).toLocaleDateString()} · ${t.type}</div></div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="price ${t.amount < 0 ? "cost" : ""}">${t.amount < 0 ? "-" : "+"}${fmt(Math.abs(t.amount))}</span>
+            <span class="status-tag ${t.status}">${t.status}</span>
+          </div>
+        </div>`;
+      });
     } else if(state.kidTab === "manage"){
       body += `<div class="cat-label">Chores</div>`;
       state.chores.forEach(c => {
@@ -604,6 +619,7 @@
       <div class="tab-row">
         <button class="tab-btn ${state.kidTab==="approvals"?"active":""}" data-tab="approvals">Approvals${pendingTxns.length ? ` (${pendingTxns.length})` : ""}</button>
         <button class="tab-btn ${state.kidTab==="household"?"active":""}" data-tab="household">Household</button>
+        <button class="tab-btn ${state.kidTab==="history"?"active":""}" data-tab="history">History</button>
         <button class="tab-btn ${state.kidTab==="manage"?"active":""}" data-tab="manage">Manage</button>
       </div>
       ${body}
