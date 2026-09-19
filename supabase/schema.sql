@@ -16,7 +16,7 @@ create extension if not exists "pgcrypto";
 -- ----------------------------------------------------------------------------
 create table if not exists public.households (
   id uuid primary key references auth.users (id) on delete cascade,
-  screen_time_rate numeric(10,2) not null default 5, -- minutes per $1 (display-only, never auto-converted for kids)
+  screen_time_rate numeric(10,2) not null default 5, -- minutes per $1 — sets the price when a kid buys screen time in the Shop
   created_at timestamptz not null default now()
 );
 
@@ -144,6 +144,41 @@ create table if not exists public.transactions (
 
 create index if not exists transactions_household_idx on public.transactions (household_id);
 create index if not exists transactions_member_idx on public.transactions (member_id, created_at);
+
+-- Screen-time-specific fields, added after v1. A transaction with
+-- screen_minutes set is a screen-time purchase — on approval, those
+-- minutes get credited to the member's banked balance (below) rather
+-- than being usable immediately, since starting the timer is a separate
+-- action the kid (or Banker) takes once they're actually about to use it.
+alter table public.transactions add column if not exists screen_minutes integer;
+alter table public.members add column if not exists screen_minutes_balance integer not null default 0;
+
+-- ----------------------------------------------------------------------------
+-- screen_sessions — one row per "screen time started" countdown. Storing
+-- ends_at (not just a duration) means the countdown is computed the same
+-- way on every device/reload from a single source of truth, so the kid's
+-- screen and the Banker's screen never drift or disagree about how much
+-- time is left — the whole point of this table existing.
+-- ----------------------------------------------------------------------------
+create table if not exists public.screen_sessions (
+  id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references public.households (id) on delete cascade,
+  member_id uuid not null references public.members (id) on delete cascade,
+  minutes integer not null,
+  started_at timestamptz not null default now(),
+  ends_at timestamptz not null,
+  status text not null default 'active' check (status in ('active', 'completed', 'cancelled')),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists screen_sessions_household_idx on public.screen_sessions (household_id);
+create index if not exists screen_sessions_member_idx on public.screen_sessions (member_id, status);
+
+alter table public.screen_sessions enable row level security;
+create policy "screen_sessions_select_own" on public.screen_sessions for select using (auth.uid() = household_id);
+create policy "screen_sessions_insert_own" on public.screen_sessions for insert with check (auth.uid() = household_id);
+create policy "screen_sessions_update_own" on public.screen_sessions for update using (auth.uid() = household_id);
+create policy "screen_sessions_delete_own" on public.screen_sessions for delete using (auth.uid() = household_id);
 
 -- ============================================================================
 -- Row Level Security — every table scoped strictly to the household owner

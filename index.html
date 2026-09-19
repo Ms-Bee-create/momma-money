@@ -201,20 +201,23 @@
 
   async function fetchAll(){
     const [
-      { data: members }, { data: chores }, { data: rules }, { data: logs },
-      { data: fines }, { data: rewards }, { data: txns }
+      { data: household }, { data: members }, { data: chores }, { data: rules }, { data: logs },
+      { data: fines }, { data: rewards }, { data: txns }, { data: sessions }
     ] = await Promise.all([
+      supa.from("households").select("*").eq("id", userId).maybeSingle(),
       supa.from("members").select("*").eq("household_id", userId).eq("archived", false).order("created_at"),
       supa.from("chore_templates").select("*").eq("household_id", userId).eq("archived", false).order("category"),
       supa.from("assignment_rules").select("*").eq("household_id", userId).eq("active", true),
       supa.from("chore_logs").select("*").eq("household_id", userId).order("due_date", { ascending: false }),
       supa.from("fine_templates").select("*").eq("household_id", userId).eq("archived", false),
       supa.from("reward_items").select("*").eq("household_id", userId).eq("archived", false).order("category"),
-      supa.from("transactions").select("*").eq("household_id", userId).order("created_at", { ascending: false }).limit(200)
+      supa.from("transactions").select("*").eq("household_id", userId).order("created_at", { ascending: false }).limit(200),
+      supa.from("screen_sessions").select("*").eq("household_id", userId).order("created_at", { ascending: false }).limit(50)
     ]);
     return {
+      household: household || { screen_time_rate: 5 },
       members: members || [], chores: chores || [], rules: rules || [], logs: logs || [],
-      fines: fines || [], rewards: rewards || [], txns: txns || []
+      fines: fines || [], rewards: rewards || [], txns: txns || [], sessions: sessions || []
     };
   }
 
@@ -224,7 +227,8 @@
   // shared server state since multiple household members read/write it.
   // ===========================================================================
   let state = {
-    members: [], chores: [], rules: [], logs: [], fines: [], rewards: [], txns: [],
+    household: { screen_time_rate: 5 },
+    members: [], chores: [], rules: [], logs: [], fines: [], rewards: [], txns: [], sessions: [],
     activeMemberId: null, view: "picker", kidTab: "chores",
     pinBuffer: "", pinTargetMember: null
   };
@@ -242,6 +246,32 @@
     state.kidTab = m.role === "banker" ? "approvals" : "chores";
   }
   function fmt(n){ return "$" + Number(n || 0).toFixed(2); }
+  function activeSessionFor(memberId){
+    return state.sessions.find(s => s.member_id === memberId && s.status === "active");
+  }
+  // Shared between the kid's own home and the Banker's Household tab, so
+  // both ever show the exact same countdown — the whole point being that
+  // the Banker can check remaining time without having to ask the kid.
+  function screenTimeCard(m, isBanker){
+    const session = activeSessionFor(m.id);
+    if(session){
+      return `<div class="card" style="text-align:center;">
+        <div class="kicker">Screen time running</div>
+        <div style="font-size:2rem;font-weight:800;color:var(--green-dark);" data-countdown="${session.ends_at}" data-session-id="${session.id}">--:--</div>
+        ${isBanker ? `<button class="pill-btn small outline" data-end-session="${session.id}" style="margin-top:8px;">End early</button>` : ""}
+      </div>`;
+    }
+    if((m.screen_minutes_balance || 0) > 0){
+      return `<div class="card" style="text-align:center;">
+        <div class="kicker">Screen time banked</div>
+        <div style="font-size:1.6rem;font-weight:800;">${m.screen_minutes_balance} min</div>
+        ${isBanker
+          ? `<div style="font-size:0.8rem;color:var(--text-dim);">Not started yet</div>`
+          : `<button class="pill-btn" data-start-session="${m.id}" style="margin-top:8px;">▶ Start screen time</button>`}
+      </div>`;
+    }
+    return "";
+  }
 
   // ===========================================================================
   // Mutations
@@ -254,7 +284,12 @@
     if(newBalance <= 0 && txn.amount < 0){ newBalance = 0; bankrupt = true; }
     if(newBalance > 0 && txn.amount > 0) bankrupt = false;
     await supa.from("transactions").update({ status: "approved", resolved_at: new Date().toISOString() }).eq("id", txn.id);
-    await supa.from("members").update({ current_balance: newBalance, bankrupt }).eq("id", m.id);
+    // Approving a screen-time purchase banks the minutes rather than
+    // starting them immediately — the kid (or Banker) starts the actual
+    // countdown separately, whenever they're really about to use it.
+    const memberUpdate = { current_balance: newBalance, bankrupt };
+    if(txn.screen_minutes) memberUpdate.screen_minutes_balance = (m.screen_minutes_balance || 0) + txn.screen_minutes;
+    await supa.from("members").update(memberUpdate).eq("id", m.id);
     if(txn.chore_log_id){
       await supa.from("chore_logs").update({ status: "approved", approved_at: new Date().toISOString() }).eq("id", txn.chore_log_id);
     }
@@ -286,6 +321,53 @@
       amount: -Math.abs(item.cost), description: item.title, status: "pending", reward_item_id: item.id
     });
     showToast(`Requested "${item.title}" — waiting on the Banker`);
+    reload();
+  }
+
+  function screenTimeCost(minutes){
+    const rate = Number(state.household.screen_time_rate) || 5; // minutes per $1
+    return Math.round((minutes / rate) * 100) / 100;
+  }
+
+  async function requestScreenTime(minutes, memberId){
+    const cost = screenTimeCost(minutes);
+    await supa.from("transactions").insert({
+      household_id: userId, member_id: memberId, type: "spend",
+      amount: -cost, description: `${minutes} min screen time`, status: "pending", screen_minutes: minutes
+    });
+    showToast(`Requested ${minutes} min screen time — waiting on the Banker`);
+    reload();
+  }
+
+  // Cashes in a kid's entire banked (paid-for, not-yet-used) screen time
+  // into one running countdown. Storing ends_at server-side (not just
+  // ticking a local timer) is what lets the Banker's screen and the kid's
+  // screen show the exact same time remaining without either device being
+  // the "source of truth" — and it's what stops a kid from just closing
+  // the tab to make more time appear later.
+  async function startScreenSession(memberId){
+    const m = member(memberId);
+    const minutes = m.screen_minutes_balance || 0;
+    if(minutes <= 0) return;
+    const startedAt = new Date();
+    const endsAt = new Date(startedAt.getTime() + minutes * 60000);
+    await supa.from("screen_sessions").insert({
+      household_id: userId, member_id: memberId, minutes,
+      started_at: startedAt.toISOString(), ends_at: endsAt.toISOString(), status: "active"
+    });
+    await supa.from("members").update({ screen_minutes_balance: 0 }).eq("id", memberId);
+    showToast(`Screen time started — ${minutes} min`);
+    reload();
+  }
+
+  async function endScreenSession(sessionId, reason){
+    await supa.from("screen_sessions").update({ status: reason || "completed" }).eq("id", sessionId);
+    reload();
+  }
+
+  async function setScreenTimeRate(rate){
+    await supa.from("households").update({ screen_time_rate: rate }).eq("id", userId);
+    showToast("Screen time rate updated");
     reload();
   }
 
@@ -340,13 +422,46 @@
   const SETUP_DONE_KEY = "mm_setup_done_v1";
 
   function render(){
-    if(state.view === "setup") return renderSetup();
-    if(state.view === "picker") return renderPicker();
-    if(state.view === "pin") return renderPinPad();
-    const m = activeMember();
-    if(!m){ state.view = "picker"; return renderPicker(); }
-    if(m.role === "banker") return renderBankerDesk();
-    return renderKidHome();
+    if(state.view === "setup") renderSetup();
+    else if(state.view === "picker") renderPicker();
+    else if(state.view === "pin") renderPinPad();
+    else {
+      const m = activeMember();
+      if(!m){ state.view = "picker"; renderPicker(); }
+      else if(m.role === "banker") renderBankerDesk();
+      else renderKidHome();
+    }
+    startCountdownTicker();
+  }
+
+  // Ticks any visible screen-time countdown once a second by writing
+  // straight to the DOM, instead of re-running the full render() loop —
+  // a full re-render every second would fight the user for scroll
+  // position and cursor focus. Reads ends_at (set server-side when the
+  // session started) off each element's own dataset, so it's always
+  // computing "how long is actually left" fresh rather than trusting a
+  // number that could drift.
+  let countdownInterval = null;
+  function startCountdownTicker(){
+    clearInterval(countdownInterval);
+    countdownInterval = setInterval(() => {
+      document.querySelectorAll("[data-countdown]").forEach(el => {
+        const endsAt = new Date(el.dataset.countdown).getTime();
+        const remainingMs = endsAt - Date.now();
+        if(remainingMs <= 0){
+          el.textContent = "Time's up!";
+          if(!el.dataset.completedFired){
+            el.dataset.completedFired = "1";
+            endScreenSession(el.dataset.sessionId, "completed");
+          }
+        } else {
+          const totalSec = Math.ceil(remainingMs / 1000);
+          const mm = Math.floor(totalSec / 60);
+          const ss = totalSec % 60;
+          el.textContent = `${mm}:${String(ss).padStart(2, "0")}`;
+        }
+      });
+    }, 1000);
   }
 
   function switchProfileHeader(){
@@ -546,6 +661,20 @@
         });
       });
     } else if(state.kidTab === "shop"){
+      const rate = Number(state.household.screen_time_rate) || 5;
+      body += `<div class="cat-label">Buy Screen Time</div>
+        <div class="card" style="margin-bottom:16px;">
+          <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:10px;">$1 = ${rate} min</div>
+          <div style="display:flex;align-items:center;gap:12px;justify-content:center;">
+            <button class="pill-btn outline" id="stMinus" type="button">−5</button>
+            <div style="text-align:center;min-width:70px;">
+              <div style="font-size:1.4rem;font-weight:800;" id="stMinutes">15</div>
+              <div style="font-size:0.72rem;color:var(--text-dim);">minutes</div>
+            </div>
+            <button class="pill-btn outline" id="stPlus" type="button">+5</button>
+          </div>
+          <button class="primary-btn gold" id="stBuy" style="background:var(--gold);color:#3a2b05;">Request for <span id="stCost">${fmt(screenTimeCost(15))}</span></button>
+        </div>`;
       const byCat = {};
       state.rewards.forEach(r => { (byCat[r.category] = byCat[r.category] || []).push(r); });
       Object.keys(byCat).forEach(cat => {
@@ -580,6 +709,7 @@
         <div class="amount">${fmt(m.current_balance)}</div>
         ${m.bankrupt ? `<span class="bankrupt-tag">Bankruptcy Protection — do Community Service chores to clear it</span>` : ""}
       </div>
+      ${screenTimeCard(m, false)}
       <div class="tab-row">
         <button class="tab-btn ${state.kidTab==="chores"?"active":""}" data-tab="chores">My Chores</button>
         <button class="tab-btn ${state.kidTab==="earn"?"active":""}" data-tab="earn">Earn More</button>
@@ -606,6 +736,28 @@
       const item = state.rewards.find(r => r.id === btn.dataset.spend);
       requestReward(item, state.activeMemberId);
     }));
+    const startBtn = app.querySelector("[data-start-session]");
+    if(startBtn) startBtn.addEventListener("click", () => startScreenSession(startBtn.dataset.startSession));
+    wireScreenTimeStepper();
+  }
+
+  // Shared between kid Shop tab wiring — the stepper has no server round
+  // trip until "Request" is pressed, so +5/-5 just update the two on-screen
+  // numbers directly.
+  function wireScreenTimeStepper(){
+    const minutesEl = document.getElementById("stMinutes");
+    if(!minutesEl) return;
+    const costEl = document.getElementById("stCost");
+    const buyBtn = document.getElementById("stBuy");
+    let minutes = 15;
+    const refresh = () => {
+      minutesEl.textContent = minutes;
+      costEl.textContent = fmt(screenTimeCost(minutes));
+      buyBtn.disabled = minutes <= 0;
+    };
+    document.getElementById("stMinus").addEventListener("click", () => { minutes = Math.max(5, minutes - 5); refresh(); });
+    document.getElementById("stPlus").addEventListener("click", () => { minutes += 5; refresh(); });
+    buyBtn.addEventListener("click", () => requestScreenTime(minutes, state.activeMemberId));
   }
 
   // ------------------------------------------------------------- Banker desk
@@ -641,6 +793,7 @@
             <button class="pill-btn small" data-fine="${k.id}">Fine</button>
           </div>
         </div>`;
+        body += screenTimeCard(k, true);
       });
       if(!state.members.filter(m=>m.role==="kid").length){
         body += `<div class="empty-note">No kids added yet.</div>`;
@@ -694,7 +847,17 @@
           </div>
         </div>`;
       });
-      body += `<button class="pill-btn" id="addRewardBtn" style="margin:8px 0;">+ Add reward</button>`;
+      body += `<button class="pill-btn" id="addRewardBtn" style="margin:8px 0 22px;">+ Add reward</button>`;
+
+      body += `<div class="cat-label">Screen Time Rate</div>
+        <div class="card">
+          <div style="font-size:0.85rem;color:var(--text-dim);margin-bottom:10px;">How many minutes a kid gets per $1 spent in the Shop.</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <input type="number" id="rateInput" step="1" min="1" value="${Number(state.household.screen_time_rate) || 5}" style="width:100px;" />
+            <span style="font-size:0.85rem;">min per $1</span>
+            <button class="pill-btn" id="rateSave">Save</button>
+          </div>
+        </div>`;
     }
 
     app.innerHTML = `
@@ -732,6 +895,15 @@
     if(addFineBtn) addFineBtn.addEventListener("click", () => openCatalogSheet("fine", null));
     const addRewardBtn = document.getElementById("addRewardBtn");
     if(addRewardBtn) addRewardBtn.addEventListener("click", () => openCatalogSheet("reward", null));
+    app.querySelectorAll("[data-end-session]").forEach(btn => btn.addEventListener("click", () => {
+      if(confirm("End this screen time session now?")) endScreenSession(btn.dataset.endSession, "cancelled");
+    }));
+    const rateSaveBtn = document.getElementById("rateSave");
+    if(rateSaveBtn) rateSaveBtn.addEventListener("click", () => {
+      const rate = parseFloat(document.getElementById("rateInput").value);
+      if(!rate || rate <= 0) return;
+      setScreenTimeRate(rate);
+    });
   }
 
   // Shared config for the three editable catalogs (chores/fines/rewards) so
