@@ -997,7 +997,20 @@
       // the SAME user id — this household's data (which is all keyed to
       // that id) comes along for free instead of needing to be migrated.
       const { data, error } = await supa.auth.updateUser({ email, password });
-      if(error){ markInvalid(passwordInput, error.message); return; }
+      if(error){
+        // Supabase blocks setting a password on an anonymous user until its
+        // email is confirmed — which needs "Confirm email" turned OFF in
+        // Authentication settings for a one-step save like this to work at
+        // all (the confirmation-email path is also rate-limited hard on
+        // Supabase's default mailer, so it's not a practical alternative
+        // for this app). Point straight at the fix instead of just showing
+        // Supabase's own confusing error text.
+        const msg = /invalid|confirm|anonymous/i.test(error.message)
+          ? `Couldn't save — turn off "Confirm email" under Authentication settings in Supabase, then try again.`
+          : error.message;
+        markInvalid(passwordInput, msg);
+        return;
+      }
       state.authUser = data.user;
       showToast("Login saved — this household is now reachable from anywhere");
       render();
