@@ -120,7 +120,7 @@
   label.field-label{display:block;font-size:0.78rem;font-weight:700;color:var(--text-dim);margin:14px 0 6px;}
   .input-error{border-color:var(--red) !important;}
   .field-error-msg{color:var(--red);font-size:0.78rem;margin-top:5px;}
-  input[type="text"], input[type="number"], select{
+  input[type="text"], input[type="number"], input[type="email"], input[type="password"], select{
     width:100%;font:inherit;font-size:0.92rem;padding:11px 12px;border-radius:12px;
     border:1px solid var(--border);background:var(--panel);color:var(--text);
   }
@@ -182,20 +182,23 @@
     showToast._t = setTimeout(() => t.classList.remove("show"), 2200);
   }
 
+  // Returns the existing session, or null — no longer auto-creates an
+  // anonymous one here. An anonymous session only ever gets created when
+  // the person explicitly chooses "Set up a brand-new household" on the
+  // login screen, since auto-creating one on every visit with no session
+  // is exactly what made the artifact (a different origin, so it never
+  // sees GitHub Pages' saved session) silently spin up an empty household
+  // instead of showing a way back into the real one.
   async function initSupabase(){
     try{
       supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-      let { data: { session } } = await supa.auth.getSession();
-      if(!session){
-        const { data, error } = await supa.auth.signInAnonymously();
-        if(error) throw error;
-        session = data.session;
-      }
-      userId = session.user.id;
+      const { data: { session } } = await supa.auth.getSession();
       remoteReady = true;
+      return session;
     }catch(e){
-      console.warn("Supabase unavailable, running local-only:", e);
+      console.warn("Supabase unavailable:", e);
       remoteReady = false;
+      return null;
     }
   }
 
@@ -229,8 +232,9 @@
   let state = {
     household: { screen_time_rate: 5 },
     members: [], chores: [], rules: [], logs: [], fines: [], rewards: [], txns: [], sessions: [],
-    activeMemberId: null, view: "picker", kidTab: "chores",
-    pinBuffer: "", pinTargetMember: null
+    activeMemberId: null, view: "login", kidTab: "chores",
+    pinBuffer: "", pinTargetMember: null,
+    authUser: null // the Supabase auth user (email + is_anonymous), not a household member profile
   };
 
   async function reload(){
@@ -422,7 +426,8 @@
   const SETUP_DONE_KEY = "mm_setup_done_v1";
 
   function render(){
-    if(state.view === "setup") renderSetup();
+    if(state.view === "login") renderLogin();
+    else if(state.view === "setup") renderSetup();
     else if(state.view === "picker") renderPicker();
     else if(state.view === "pin") renderPinPad();
     else {
@@ -469,6 +474,50 @@
       <h1>Momma<span class="dot"> $</span></h1>
       <button class="icon-btn" id="switchProfileBtn">🔁 Switch</button>
     </header>`;
+  }
+
+  // Real email/password login — separate from the in-app member PIN switch.
+  // This is what makes the same household reachable from more than one
+  // origin (GitHub Pages, an Artifact, a future homeschool site): the PIN
+  // switch was always just picking a profile inside one already-loaded
+  // household, never an actual account boundary.
+  function renderLogin(){
+    app.innerHTML = `
+      <header class="app-header"><h1>Momma<span class="dot"> $</span></h1></header>
+      <div class="kicker">Sign in</div>
+      <h2>Welcome back</h2>
+      <div class="card">
+        <label class="field-label" style="margin-top:0;">Email</label>
+        <input type="email" id="loginEmail" placeholder="you@example.com" />
+        <label class="field-label">Password</label>
+        <input type="password" id="loginPassword" placeholder="Password" />
+        <button class="primary-btn" id="loginBtn">Sign in</button>
+      </div>
+      <div style="text-align:center;margin-top:16px;">
+        <button class="pill-btn outline" id="newHouseholdBtn">Set up a brand-new household instead</button>
+      </div>
+    `;
+    const emailInput = document.getElementById("loginEmail");
+    const passwordInput = document.getElementById("loginPassword");
+    emailInput.addEventListener("input", () => clearInvalid(emailInput));
+    passwordInput.addEventListener("input", () => clearInvalid(passwordInput));
+
+    document.getElementById("loginBtn").addEventListener("click", async () => {
+      const email = emailInput.value.trim();
+      const password = passwordInput.value;
+      if(!email){ markInvalid(emailInput, "Enter your email"); return; }
+      if(!password){ markInvalid(passwordInput, "Enter your password"); return; }
+      const { data, error } = await supa.auth.signInWithPassword({ email, password });
+      if(error){ markInvalid(passwordInput, error.message); return; }
+      showToast("Signed in");
+      await afterSignedIn(data.session);
+    });
+
+    document.getElementById("newHouseholdBtn").addEventListener("click", async () => {
+      const { data, error } = await supa.auth.signInAnonymously();
+      if(error){ showToast("Couldn't start — check your connection"); return; }
+      await afterSignedIn(data.session);
+    });
   }
 
   function renderSetup(){
@@ -858,6 +907,29 @@
             <button class="pill-btn" id="rateSave">Save</button>
           </div>
         </div>`;
+
+      body += `<div class="cat-label">Account</div>`;
+      if(state.authUser && state.authUser.is_anonymous === false){
+        body += `<div class="card">
+          <div style="font-size:0.85rem;color:var(--text-dim);">Signed in as</div>
+          <div style="font-weight:700;margin:4px 0 12px;">${escapeHtml(state.authUser.email)}</div>
+          <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:12px;">This login works from any device or site pointed at Momma Money — sign in with this same email and password to reach this exact household.</div>
+          <button class="pill-btn outline" id="signOutBtn">Sign out</button>
+        </div>`;
+      } else {
+        body += `<div class="card">
+          <div style="font-size:0.85rem;color:var(--text-dim);margin-bottom:12px;">
+            This household is only saved on this device right now. Set up an email and password
+            to reach this exact same household — chores, balances, everything — from another
+            device, an Artifact copy, or another site, instead of it starting over empty.
+          </div>
+          <label class="field-label" style="margin-top:0;">Email</label>
+          <input type="email" id="acctEmail" placeholder="you@example.com" />
+          <label class="field-label">Password</label>
+          <input type="password" id="acctPassword" placeholder="At least 6 characters" />
+          <button class="primary-btn" id="acctSave">Save login</button>
+        </div>`;
+      }
     }
 
     app.innerHTML = `
@@ -903,6 +975,32 @@
       const rate = parseFloat(document.getElementById("rateInput").value);
       if(!rate || rate <= 0) return;
       setScreenTimeRate(rate);
+    });
+    const signOutBtn = document.getElementById("signOutBtn");
+    if(signOutBtn) signOutBtn.addEventListener("click", async () => {
+      if(!confirm("Sign out of this account on this device?")) return;
+      await supa.auth.signOut();
+      state.activeMemberId = null;
+      state.authUser = null;
+      state.view = "login";
+      render();
+    });
+    const acctSaveBtn = document.getElementById("acctSave");
+    if(acctSaveBtn) acctSaveBtn.addEventListener("click", async () => {
+      const emailInput = document.getElementById("acctEmail");
+      const passwordInput = document.getElementById("acctPassword");
+      const email = emailInput.value.trim();
+      const password = passwordInput.value;
+      if(!email){ markInvalid(emailInput, "Enter an email"); return; }
+      if(password.length < 6){ markInvalid(passwordInput, "At least 6 characters"); return; }
+      // Converts the current anonymous session into a permanent one under
+      // the SAME user id — this household's data (which is all keyed to
+      // that id) comes along for free instead of needing to be migrated.
+      const { data, error } = await supa.auth.updateUser({ email, password });
+      if(error){ markInvalid(passwordInput, error.message); return; }
+      state.authUser = data.user;
+      showToast("Login saved — this household is now reachable from anywhere");
+      render();
     });
   }
 
@@ -1099,13 +1197,13 @@
   // ===========================================================================
   // Boot
   // ===========================================================================
-  (async function boot(){
-    app.innerHTML = `<div class="empty-note">Loading Momma Money…</div>`;
-    await initSupabase();
-    if(!remoteReady){
-      app.innerHTML = `<div class="empty-note">Couldn't connect — check your internet connection and reload.</div>`;
-      return;
-    }
+  // Runs once we actually have a signed-in session (anonymous or real) —
+  // shared by normal page load, "sign in", and "set up a new household",
+  // so all three land on the same first-run/picker logic.
+  async function afterSignedIn(session){
+    userId = session.user.id;
+    state.authUser = session.user;
+    state.view = "picker";
     await reload();
     // First-ever visit: the new-household trigger seeds data right after
     // sign-up, which can lose a race with this initial fetch. One short
@@ -1122,8 +1220,19 @@
     try{ setupDone = !!localStorage.getItem(SETUP_DONE_KEY); }catch(e){}
     if(!state.members.some(m => m.role === "kid") && !setupDone){
       state.view = "setup";
-      render();
     }
+    render();
+  }
+
+  (async function boot(){
+    app.innerHTML = `<div class="empty-note">Loading Momma Money…</div>`;
+    const session = await initSupabase();
+    if(!remoteReady){
+      app.innerHTML = `<div class="empty-note">Couldn't connect — check your internet connection and reload.</div>`;
+      return;
+    }
+    if(session) await afterSignedIn(session);
+    else { state.view = "login"; render(); }
   })();
 })();
 </script>
