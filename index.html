@@ -239,6 +239,7 @@
 
   async function reload(){
     Object.assign(state, await fetchAll());
+    await applyDueOvertimeCharges();
     render();
   }
 
@@ -251,18 +252,63 @@
   }
   function fmt(n){ return "$" + Number(n || 0).toFixed(2); }
   function activeSessionFor(memberId){
-    return state.sessions.find(s => s.member_id === memberId && s.status === "active");
+    return state.sessions.find(s => s.member_id === memberId && (s.status === "active" || s.status === "overtime"));
   }
+
+  // Store hours gate purchasing (screen time + reward requests) in the Shop
+  // tab — no override, so a closed store is really closed. Starting
+  // already-banked screen time is unaffected: he can cash in minutes he's
+  // already bought whenever he's ready, per the agreed design.
+  function isStoreOpen(){
+    const now = new Date();
+    const day = now.getDay(); // 0 Sun .. 6 Sat
+    const hour = now.getHours() + now.getMinutes() / 60;
+    if(day >= 1 && day <= 5) return hour >= 15 && hour < 17;   // weekdays 3-5pm
+    if(day === 6) return hour >= 9 && hour < 18;                // Saturday 9am-6pm
+    return hour >= 12 && hour < 17;                             // Sunday 12pm-5pm
+  }
+  const STORE_HOURS_TEXT = "Weekdays 3–5pm · Saturdays 9am–6pm · Sundays 12pm–5pm";
+
+  // A short, unmissable tone at zero — not just a color change on a card
+  // that might be off-screen. Built with Web Audio instead of an audio file
+  // so there's nothing extra to host or load.
+  function playTimesUpTone(){
+    try{
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      let t = ctx.currentTime;
+      for(let i = 0; i < 3; i++){
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = 880;
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.35, t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.4);
+        t += 0.45;
+      }
+    }catch(e){}
+  }
+
   // Shared between the kid's own home and the Banker's Household tab, so
   // both ever show the exact same countdown — the whole point being that
   // the Banker can check remaining time without having to ask the kid.
+  // Once it hits zero the session doesn't auto-end: it flips to "overtime"
+  // and keeps counting UP in red, because anything played past zero is what
+  // gets deducted from tomorrow's balance — the cost only exists if someone
+  // actually has to stop it.
   function screenTimeCard(m, isBanker){
     const session = activeSessionFor(m.id);
     if(session){
-      return `<div class="card" style="text-align:center;">
-        <div class="kicker">Screen time running</div>
-        <div style="font-size:2rem;font-weight:800;color:var(--green-dark);" data-countdown="${session.ends_at}" data-session-id="${session.id}">--:--</div>
-        ${isBanker ? `<button class="pill-btn small outline" data-end-session="${session.id}" style="margin-top:8px;">End early</button>` : ""}
+      const isOvertime = session.status === "overtime";
+      return `<div class="card" style="text-align:center;${isOvertime ? "border-color:var(--red);background:var(--red-light);" : ""}">
+        <div class="kicker" style="${isOvertime ? "color:var(--red);" : ""}">${isOvertime ? "⏰ Time's up — playing overtime" : "Screen time running"}</div>
+        <div style="font-size:3.2rem;line-height:1.1;font-weight:800;${isOvertime ? "color:var(--red);" : "color:var(--green-dark);"}" data-countdown="${session.ends_at}" data-session-id="${session.id}" data-session-status="${session.status}">--:--</div>
+        ${isOvertime ? `<div style="font-size:0.8rem;color:var(--red);margin:2px 0 8px;">Comes out of tomorrow's balance</div>` : ""}
+        <button class="pill-btn ${isOvertime ? "" : "outline"} small" data-end-session="${session.id}" style="margin-top:8px;">${isOvertime ? "Stop now" : "Stop early"}</button>
       </div>`;
     }
     if((m.screen_minutes_balance || 0) > 0){
@@ -364,9 +410,66 @@
     reload();
   }
 
-  async function endScreenSession(sessionId, reason){
-    await supa.from("screen_sessions").update({ status: reason || "completed" }).eq("id", sessionId);
+  // Ends a session, whether that's a Banker/kid stopping it early (no
+  // overtime — now is still before ends_at) or someone finally stopping an
+  // overtime session that already blew past zero. The overtime minutes are
+  // costed at the household's rate and charged against tomorrow, not today,
+  // so the deduction lands as a real consequence the next time the store
+  // opens rather than an instant clawback of the purchase just made.
+  async function finishScreenSession(sessionId){
+    const session = state.sessions.find(s => s.id === sessionId);
+    if(!session) return;
+    const overtimeMinutes = Math.max(0, Math.ceil((Date.now() - new Date(session.ends_at).getTime()) / 60000));
+    await supa.from("screen_sessions").update({ status: "completed" }).eq("id", sessionId);
+    if(overtimeMinutes > 0){
+      await chargeOvertimeTomorrow(session.member_id, overtimeMinutes);
+      showToast(`Ended — ${overtimeMinutes} min overtime comes off tomorrow's balance`);
+    } else {
+      showToast("Screen time ended");
+    }
     reload();
+  }
+
+  async function chargeOvertimeTomorrow(memberId, minutes){
+    const m = member(memberId);
+    if(!m) return;
+    const rate = Number(state.household.screen_time_rate) || 5; // minutes per $1
+    const cost = Math.round((minutes / rate) * 100) / 100;
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    await supa.from("members").update({
+      pending_overtime_charge: Number(m.pending_overtime_charge || 0) + cost,
+      pending_overtime_charge_date: tomorrow.toISOString().slice(0, 10)
+    }).eq("id", memberId);
+  }
+
+  // Runs on every reload. Any overtime charge whose effective date has
+  // arrived gets applied as an approved fine and cleared — this is what
+  // makes "deducted from tomorrow's balance" actually happen with no cron
+  // job: the first reload on/after that date settles it.
+  async function applyDueOvertimeCharges(){
+    const today = new Date().toISOString().slice(0, 10);
+    const due = state.members.filter(m =>
+      Number(m.pending_overtime_charge) > 0 && m.pending_overtime_charge_date && m.pending_overtime_charge_date <= today
+    );
+    for(const m of due){
+      const cost = Number(m.pending_overtime_charge);
+      const newBalance = Math.max(0, Number(m.current_balance) - cost);
+      const bankrupt = newBalance <= 0;
+      await supa.from("transactions").insert({
+        household_id: userId, member_id: m.id, type: "fine",
+        amount: -cost, description: "Overtime screen time (yesterday)",
+        status: "approved", resolved_at: new Date().toISOString()
+      });
+      await supa.from("members").update({
+        current_balance: newBalance, bankrupt,
+        pending_overtime_charge: 0, pending_overtime_charge_date: null
+      }).eq("id", m.id);
+      m.current_balance = newBalance;
+      m.bankrupt = bankrupt;
+      m.pending_overtime_charge = 0;
+      m.pending_overtime_charge_date = null;
+    }
   }
 
   async function setScreenTimeRate(rate){
@@ -454,10 +557,25 @@
         const endsAt = new Date(el.dataset.countdown).getTime();
         const remainingMs = endsAt - Date.now();
         if(remainingMs <= 0){
-          el.textContent = "Time's up!";
-          if(!el.dataset.completedFired){
-            el.dataset.completedFired = "1";
-            endScreenSession(el.dataset.sessionId, "completed");
+          // Past zero: keep counting UP instead of stopping, since the whole
+          // point is that overtime is visible and has a real cost, not a
+          // dead "Time's up!" label the kid can ignore.
+          const overtimeSec = Math.floor(-remainingMs / 1000);
+          const mm = Math.floor(overtimeSec / 60);
+          const ss = overtimeSec % 60;
+          el.textContent = `+${mm}:${String(ss).padStart(2, "0")}`;
+          if(!el.dataset.overtimeFired){
+            el.dataset.overtimeFired = "1";
+            if(el.dataset.sessionStatus === "active"){
+              playTimesUpTone();
+              const sess = state.sessions.find(s => s.id === el.dataset.sessionId);
+              if(sess) sess.status = "overtime";
+              supa.from("screen_sessions").update({ status: "overtime" }).eq("id", el.dataset.sessionId);
+              // Re-render now so the card switches to its red overtime look
+              // (border, "Comes out of tomorrow's balance") without waiting
+              // for the next unrelated navigation.
+              render();
+            }
           }
         } else {
           const totalSec = Math.ceil(remainingMs / 1000);
@@ -711,18 +829,23 @@
       });
     } else if(state.kidTab === "shop"){
       const rate = Number(state.household.screen_time_rate) || 5;
+      const storeOpen = isStoreOpen();
+      body += `<div class="card" style="text-align:center;margin-bottom:16px;${storeOpen ? "" : "background:var(--gold-light);"}">
+        <div style="font-weight:800;${storeOpen ? "color:var(--green-dark);" : "color:var(--gold-dark);"}">${storeOpen ? "🟢 Store's open" : "🔒 Store's closed"}</div>
+        <div style="font-size:0.78rem;color:var(--text-dim);margin-top:4px;">${STORE_HOURS_TEXT}</div>
+      </div>`;
       body += `<div class="cat-label">Buy Screen Time</div>
         <div class="card" style="margin-bottom:16px;">
           <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:10px;">$1 = ${rate} min</div>
           <div style="display:flex;align-items:center;gap:12px;justify-content:center;">
-            <button class="pill-btn outline" id="stMinus" type="button">−5</button>
+            <button class="pill-btn outline" id="stMinus" type="button" ${storeOpen ? "" : "disabled"}>−5</button>
             <div style="text-align:center;min-width:70px;">
               <div style="font-size:1.4rem;font-weight:800;" id="stMinutes">15</div>
               <div style="font-size:0.72rem;color:var(--text-dim);">minutes</div>
             </div>
-            <button class="pill-btn outline" id="stPlus" type="button">+5</button>
+            <button class="pill-btn outline" id="stPlus" type="button" ${storeOpen ? "" : "disabled"}>+5</button>
           </div>
-          <button class="primary-btn gold" id="stBuy" style="background:var(--gold);color:#3a2b05;">Request for <span id="stCost">${fmt(screenTimeCost(15))}</span></button>
+          <button class="primary-btn gold" id="stBuy" style="background:var(--gold);color:#3a2b05;" ${storeOpen ? "" : "disabled"}>${storeOpen ? `Request for <span id="stCost">${fmt(screenTimeCost(15))}</span>` : "Store's closed"}</button>
         </div>`;
       const byCat = {};
       state.rewards.forEach(r => { (byCat[r.category] = byCat[r.category] || []).push(r); });
@@ -732,7 +855,7 @@
           const afford = Number(m.current_balance) >= Number(r.cost) && !m.bankrupt;
           body += `<div class="item-row">
             <div class="title">${escapeHtml(r.title)}</div>
-            <button class="pill-btn gold" data-spend="${r.id}" ${afford ? "" : "disabled"}>${fmt(r.cost)}</button>
+            <button class="pill-btn gold" data-spend="${r.id}" ${(afford && storeOpen) ? "" : "disabled"}>${fmt(r.cost)}</button>
           </div>`;
         });
       });
@@ -787,6 +910,7 @@
     }));
     const startBtn = app.querySelector("[data-start-session]");
     if(startBtn) startBtn.addEventListener("click", () => startScreenSession(startBtn.dataset.startSession));
+    app.querySelectorAll("[data-end-session]").forEach(btn => btn.addEventListener("click", () => finishScreenSession(btn.dataset.endSession)));
     wireScreenTimeStepper();
   }
 
@@ -968,7 +1092,7 @@
     const addRewardBtn = document.getElementById("addRewardBtn");
     if(addRewardBtn) addRewardBtn.addEventListener("click", () => openCatalogSheet("reward", null));
     app.querySelectorAll("[data-end-session]").forEach(btn => btn.addEventListener("click", () => {
-      if(confirm("End this screen time session now?")) endScreenSession(btn.dataset.endSession, "cancelled");
+      if(confirm("Stop this screen time session now?")) finishScreenSession(btn.dataset.endSession);
     }));
     const rateSaveBtn = document.getElementById("rateSave");
     if(rateSaveBtn) rateSaveBtn.addEventListener("click", () => {

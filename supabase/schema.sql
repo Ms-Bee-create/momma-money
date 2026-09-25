@@ -324,3 +324,16 @@ drop trigger if exists on_auth_user_created_household on auth.users;
 create trigger on_auth_user_created_household
   after insert on auth.users
   for each row execute function public.handle_new_household();
+
+-- Overtime screen time: past-zero minutes get costed and deducted from
+-- tomorrow's balance (not today's), so it's a real consequence rather than
+-- an instant clawback the moment the timer hits zero.
+alter table public.members add column if not exists pending_overtime_charge numeric not null default 0;
+alter table public.members add column if not exists pending_overtime_charge_date date;
+
+-- A session that hits zero flips to 'overtime' (still running, counting up)
+-- instead of auto-completing, so playing past zero is visible and costs
+-- something instead of just ending silently.
+alter table public.screen_sessions drop constraint if exists screen_sessions_status_check;
+alter table public.screen_sessions add constraint screen_sessions_status_check
+  check (status in ('active', 'overtime', 'completed', 'cancelled'));
