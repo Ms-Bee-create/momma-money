@@ -549,6 +549,25 @@
   // session started) off each element's own dataset, so it's always
   // computing "how long is actually left" fresh rather than trusting a
   // number that could drift.
+  // There's no realtime subscription — a screen left open (say, the
+  // Banker's tablet sitting on the counter) never hears about a chore
+  // submission or screen-time request that happens on someone else's
+  // device. Tab switches and button clicks only re-fetch as a side effect
+  // of a mutation, not on their own. This polls quietly in the background
+  // so "the kid just asked" actually shows up without anyone having to
+  // manually reload the page — but skips a beat while a sheet is open or
+  // someone's mid-typing, so it never yanks focus out from under them.
+  let autoRefreshInterval = null;
+  function startAutoRefresh(){
+    clearInterval(autoRefreshInterval);
+    autoRefreshInterval = setInterval(() => {
+      const active = document.activeElement;
+      const typing = active && ["INPUT", "SELECT", "TEXTAREA"].includes(active.tagName);
+      const sheetOpen = document.querySelector(".overlay.open");
+      if(!typing && !sheetOpen) reload();
+    }, 15000);
+  }
+
   let countdownInterval = null;
   function startCountdownTicker(){
     clearInterval(countdownInterval);
@@ -1103,6 +1122,7 @@
     const signOutBtn = document.getElementById("signOutBtn");
     if(signOutBtn) signOutBtn.addEventListener("click", async () => {
       if(!confirm("Sign out of this account on this device?")) return;
+      clearInterval(autoRefreshInterval);
       await supa.auth.signOut();
       state.activeMemberId = null;
       state.authUser = null;
@@ -1359,6 +1379,7 @@
       state.view = "setup";
     }
     render();
+    startAutoRefresh();
   }
 
   (async function boot(){
