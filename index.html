@@ -443,10 +443,13 @@
     }).eq("id", memberId);
   }
 
-  // Runs on every reload. Any overtime charge whose effective date has
-  // arrived gets applied as an approved fine and cleared — this is what
-  // makes "deducted from tomorrow's balance" actually happen with no cron
-  // job: the first reload on/after that date settles it.
+  // Runs on every reload — including from whatever other device/tab is also
+  // polling (see startAutoRefresh), so two devices can genuinely race to
+  // apply the same charge at nearly the same moment. The update below is an
+  // optimistic-lock claim: it only clears pending_overtime_charge if it
+  // still equals the exact amount we read, so whichever caller's write
+  // lands first "wins" the charge, and the loser's update matches zero rows
+  // and skips inserting a fine — instead of both of them charging it.
   async function applyDueOvertimeCharges(){
     const today = new Date().toISOString().slice(0, 10);
     const due = state.members.filter(m =>
@@ -454,6 +457,12 @@
     );
     for(const m of due){
       const cost = Number(m.pending_overtime_charge);
+      const { data: claimed } = await supa.from("members")
+        .update({ pending_overtime_charge: 0, pending_overtime_charge_date: null })
+        .eq("id", m.id)
+        .eq("pending_overtime_charge", cost)
+        .select();
+      if(!claimed || !claimed.length) continue; // another device already claimed this charge
       const newBalance = Math.max(0, Number(m.current_balance) - cost);
       const bankrupt = newBalance <= 0;
       await supa.from("transactions").insert({
@@ -461,10 +470,7 @@
         amount: -cost, description: "Overtime screen time (yesterday)",
         status: "approved", resolved_at: new Date().toISOString()
       });
-      await supa.from("members").update({
-        current_balance: newBalance, bankrupt,
-        pending_overtime_charge: 0, pending_overtime_charge_date: null
-      }).eq("id", m.id);
+      await supa.from("members").update({ current_balance: newBalance, bankrupt }).eq("id", m.id);
       m.current_balance = newBalance;
       m.bankrupt = bankrupt;
       m.pending_overtime_charge = 0;
