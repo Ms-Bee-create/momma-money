@@ -306,7 +306,7 @@
       const isOvertime = session.status === "overtime";
       return `<div class="card" style="text-align:center;${isOvertime ? "border-color:var(--red);background:var(--red-light);" : ""}">
         <div class="kicker" style="${isOvertime ? "color:var(--red);" : ""}">${isOvertime ? "⏰ Time's up — playing overtime" : "Screen time running"}</div>
-        <div style="font-size:3.2rem;line-height:1.1;font-weight:800;${isOvertime ? "color:var(--red);" : "color:var(--green-dark);"}" data-countdown="${session.ends_at}" data-session-id="${session.id}" data-session-status="${session.status}">--:--</div>
+        <div style="font-size:3.2rem;line-height:1.1;font-weight:800;${isOvertime ? "color:var(--red);" : "color:var(--green-dark);"}" data-countdown="${session.ends_at}" data-session-id="${session.id}" data-session-status="${session.status}" data-member-id="${session.member_id}">--:--</div>
         ${isOvertime ? `<div style="font-size:0.8rem;color:var(--red);margin:2px 0 8px;">Comes out of tomorrow's balance</div>` : ""}
         <button class="pill-btn ${isOvertime ? "" : "outline"} small" data-end-session="${session.id}" style="margin-top:8px;">${isOvertime ? "Stop now" : "Stop early"}</button>
       </div>`;
@@ -529,6 +529,7 @@
   const SETUP_DONE_KEY = "mm_setup_done_v1";
 
   function render(){
+    lastActivityAt = Date.now();
     if(state.view === "login") renderLogin();
     else if(state.view === "setup") renderSetup();
     else if(state.view === "picker") renderPicker();
@@ -568,6 +569,21 @@
     }, 15000);
   }
 
+  // "Ryan left his timer running" safeguard: if the device showing his own
+  // running countdown gets no touch/click/key/scroll for 10 minutes, we
+  // treat that as him having walked away (or fallen asleep) and stop the
+  // session right there — capping how much overtime can ever pile up
+  // unattended instead of letting it run indefinitely until someone
+  // happens to open the app again. Only fires on the kid's OWN home screen
+  // (state.activeMemberId matches the session's member) so a Banker's
+  // tablet sitting idle on the Household tab never stops a kid's session
+  // that's actually still running fine on his own device.
+  const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+  let lastActivityAt = Date.now();
+  ["mousemove", "mousedown", "keydown", "touchstart", "scroll"].forEach(evt => {
+    document.addEventListener(evt, () => { lastActivityAt = Date.now(); }, { passive: true });
+  });
+
   let countdownInterval = null;
   function startCountdownTicker(){
     clearInterval(countdownInterval);
@@ -575,6 +591,12 @@
       document.querySelectorAll("[data-countdown]").forEach(el => {
         const endsAt = new Date(el.dataset.countdown).getTime();
         const remainingMs = endsAt - Date.now();
+        const isOwnScreen = state.activeMemberId === el.dataset.memberId;
+        if(isOwnScreen && !el.dataset.idleStopFired && (Date.now() - lastActivityAt) > IDLE_TIMEOUT_MS){
+          el.dataset.idleStopFired = "1";
+          finishScreenSession(el.dataset.sessionId);
+          return;
+        }
         if(remainingMs <= 0){
           // Past zero: keep counting UP instead of stopping, since the whole
           // point is that overtime is visible and has a real cost, not a
