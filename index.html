@@ -237,10 +237,58 @@
     authUser: null // the Supabase auth user (email + is_anonymous), not a household member profile
   };
 
-  async function reload(){
-    Object.assign(state, await fetchAll());
-    await applyDueOvertimeCharges();
+  // quiet = background poll: if nothing changed on the server, don't touch
+  // the DOM at all. A full re-render wipes whatever the person is in the
+  // middle of (a half-set screen-time stepper, a button mid-tap), so polling
+  // only re-renders when there is actually something new to show.
+  let lastDataSig = "";
+  async function reload(quiet){
+    const data = await fetchAll();
+    await applyDueOvertimeCharges(data.members);
+    const sig = JSON.stringify([data.household, data.members, data.txns, data.sessions, data.logs, data.chores, data.fines, data.rewards]);
+    if(quiet && sig === lastDataSig) return;
+    lastDataSig = sig;
+    Object.assign(state, data);
     render();
+  }
+
+  // Local calendar date (YYYY-MM-DD). toISOString() is UTC, which for a US
+  // evening is already "tomorrow" — that made "charge it tomorrow" land the
+  // same evening.
+  function localISO(d){
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  const round2 = n => Math.round(n * 100) / 100;
+
+  // Ignores a second tap on the same action while the first is still in
+  // flight. Without this a double-tap on "Earn More" created two or three
+  // identical pending requests, and approving all of them paid out 2-3x.
+  const inFlight = new Set();
+  async function once(key, fn){
+    if(inFlight.has(key)) return;
+    inFlight.add(key);
+    try{ return await fn(); } finally { inFlight.delete(key); }
+  }
+
+  // Balance changes are read-modify-write. Two people acting at once (Mom
+  // approving while Dad fines) or one person double-tapping used to overwrite
+  // each other, because the new balance was computed from a possibly stale
+  // copy in memory. This re-reads the row, computes the change, and only
+  // writes if the row is still exactly what was read — otherwise retries.
+  async function adjustMember(memberId, compute){
+    for(let attempt = 0; attempt < 6; attempt++){
+      const { data: cur } = await supa.from("members").select("*").eq("id", memberId).maybeSingle();
+      if(!cur) return null;
+      const next = compute(cur);
+      if(!next) return { before: cur, after: cur, unchanged: true };
+      const { data: written } = await supa.from("members").update(next)
+        .eq("id", memberId)
+        .eq("current_balance", cur.current_balance)
+        .eq("screen_minutes_balance", cur.screen_minutes_balance)
+        .select();
+      if(written && written.length) return { before: cur, after: written[0] };
+    }
+    return null;
   }
 
   function member(id){ return state.members.find(m => m.id === id); }
@@ -327,51 +375,120 @@
   // Mutations
   // ===========================================================================
   async function approveTransaction(txn){
-    const m = member(txn.member_id);
-    if(!m) return;
-    let newBalance = Number(m.current_balance) + Number(txn.amount);
-    let bankrupt = m.bankrupt;
-    if(newBalance <= 0 && txn.amount < 0){ newBalance = 0; bankrupt = true; }
-    if(newBalance > 0 && txn.amount > 0) bankrupt = false;
-    await supa.from("transactions").update({ status: "approved", resolved_at: new Date().toISOString() }).eq("id", txn.id);
-    // Approving a screen-time purchase banks the minutes rather than
-    // starting them immediately — the kid (or Banker) starts the actual
-    // countdown separately, whenever they're really about to use it.
-    const memberUpdate = { current_balance: newBalance, bankrupt };
-    if(txn.screen_minutes) memberUpdate.screen_minutes_balance = (m.screen_minutes_balance || 0) + txn.screen_minutes;
-    await supa.from("members").update(memberUpdate).eq("id", m.id);
-    if(txn.chore_log_id){
-      await supa.from("chore_logs").update({ status: "approved", approved_at: new Date().toISOString() }).eq("id", txn.chore_log_id);
-    }
-    showToast(`Approved — ${m.name}'s new balance ${fmt(newBalance)}`);
-    reload();
+    return once("approve:" + txn.id, async () => {
+      const m = member(txn.member_id);
+      if(!m) return;
+      const amount = Number(txn.amount);
+      const fresh = await supa.from("members").select("current_balance").eq("id", m.id).maybeSingle();
+      // A purchase has to be covered by the balance. A fine can overdraw
+      // (that's what bankruptcy is for), but approving a purchase the kid
+      // can't afford used to floor them at $0 and hand over the item free.
+      if(txn.type === "spend" && fresh.data && Number(fresh.data.current_balance) + amount < 0){
+        showToast(`Can't approve — ${m.name} only has ${fmt(fresh.data.current_balance)}`);
+        return;
+      }
+      // Claim the request first. If someone else (or a second tap) already
+      // approved or declined it, this matches nothing and we stop — that is
+      // what stops one request from paying out twice.
+      const { data: claimed } = await supa.from("transactions")
+        .update({ status: "approved", resolved_at: new Date().toISOString() })
+        .eq("id", txn.id).eq("status", "pending").select();
+      if(!claimed || !claimed.length){
+        showToast("Already handled");
+        reload();
+        return;
+      }
+      // Approving a screen-time purchase banks the minutes rather than
+      // starting them immediately — the kid (or Banker) starts the actual
+      // countdown separately, whenever they're really about to use it.
+      const result = await adjustMember(m.id, cur => {
+        let bal = round2(Number(cur.current_balance) + amount);
+        let bankrupt = cur.bankrupt;
+        if(bal <= 0 && amount < 0){ bal = 0; bankrupt = true; }
+        if(bal > 0 && amount > 0) bankrupt = false;
+        const next = { current_balance: bal, bankrupt };
+        if(txn.screen_minutes) next.screen_minutes_balance = (cur.screen_minutes_balance || 0) + txn.screen_minutes;
+        return next;
+      });
+      if(!result){
+        await supa.from("transactions").update({ status: "pending", resolved_at: null }).eq("id", txn.id);
+        showToast("Couldn't update the balance — try again");
+        reload();
+        return;
+      }
+      if(txn.chore_log_id){
+        await supa.from("chore_logs").update({ status: "approved", approved_at: new Date().toISOString() }).eq("id", txn.chore_log_id);
+      }
+      showToast(`Approved — ${m.name}'s new balance ${fmt(result.after.current_balance)}`);
+      reload();
+    });
   }
 
   async function rejectTransaction(txn){
-    await supa.from("transactions").update({ status: "rejected", resolved_at: new Date().toISOString() }).eq("id", txn.id);
-    if(txn.chore_log_id){
-      await supa.from("chore_logs").update({ status: "rejected" }).eq("id", txn.chore_log_id);
-    }
-    showToast("Request declined");
-    reload();
+    return once("reject:" + txn.id, async () => {
+      const { data: claimed } = await supa.from("transactions")
+        .update({ status: "rejected", resolved_at: new Date().toISOString() })
+        .eq("id", txn.id).eq("status", "pending").select();
+      if(claimed && claimed.length && txn.chore_log_id){
+        await supa.from("chore_logs").update({ status: "rejected" }).eq("id", txn.chore_log_id);
+      }
+      showToast(claimed && claimed.length ? "Request declined" : "Already handled");
+      reload();
+    });
+  }
+
+  // A kid can't have two identical requests waiting at once. That is both
+  // the double-tap guard and sensible on its own: the same chore can't be
+  // earned twice before the first one has even been looked at.
+  async function hasPendingRequest(memberId, description){
+    const { data } = await supa.from("transactions").select("id")
+      .eq("member_id", memberId).eq("description", description).eq("status", "pending").limit(1);
+    return !!(data && data.length);
   }
 
   async function submitChore(chore, memberId){
-    await supa.from("transactions").insert({
-      household_id: userId, member_id: memberId, type: "earn",
-      amount: chore.default_payout, description: chore.title, status: "pending"
+    return once("submit:" + memberId + ":" + chore.id, async () => {
+      if(await hasPendingRequest(memberId, chore.title)){
+        showToast(`"${chore.title}" is already waiting on the Banker`);
+        return;
+      }
+      await supa.from("transactions").insert({
+        household_id: userId, member_id: memberId, type: "earn",
+        amount: chore.default_payout, description: chore.title, status: "pending"
+      });
+      showToast(`Submitted "${chore.title}" for approval`);
+      reload();
     });
-    showToast(`Submitted "${chore.title}" for approval`);
-    reload();
+  }
+
+  // What a kid can still spend: balance minus everything they've already
+  // asked for that is waiting on approval. Without subtracting the pending
+  // requests, a kid with $5 could stack five $5 requests.
+  function spendableFor(m){
+    const pendingSpend = state.txns
+      .filter(t => t.member_id === m.id && t.status === "pending" && t.type === "spend")
+      .reduce((sum, t) => sum + Math.abs(Number(t.amount)), 0);
+    return round2(Number(m.current_balance) - pendingSpend);
   }
 
   async function requestReward(item, memberId){
-    await supa.from("transactions").insert({
-      household_id: userId, member_id: memberId, type: "spend",
-      amount: -Math.abs(item.cost), description: item.title, status: "pending", reward_item_id: item.id
+    return once("reward:" + memberId + ":" + item.id, async () => {
+      const m = member(memberId);
+      if(m && (m.bankrupt || spendableFor(m) < Number(item.cost))){
+        showToast("Not enough in the balance for that yet");
+        return;
+      }
+      if(await hasPendingRequest(memberId, item.title)){
+        showToast(`"${item.title}" is already waiting on the Banker`);
+        return;
+      }
+      await supa.from("transactions").insert({
+        household_id: userId, member_id: memberId, type: "spend",
+        amount: -Math.abs(item.cost), description: item.title, status: "pending", reward_item_id: item.id
+      });
+      showToast(`Requested "${item.title}" — waiting on the Banker`);
+      reload();
     });
-    showToast(`Requested "${item.title}" — waiting on the Banker`);
-    reload();
   }
 
   function screenTimeCost(minutes){
@@ -380,13 +497,25 @@
   }
 
   async function requestScreenTime(minutes, memberId){
-    const cost = screenTimeCost(minutes);
-    await supa.from("transactions").insert({
-      household_id: userId, member_id: memberId, type: "spend",
-      amount: -cost, description: `${minutes} min screen time`, status: "pending", screen_minutes: minutes
+    return once("screen:" + memberId, async () => {
+      const m = member(memberId);
+      const cost = screenTimeCost(minutes);
+      if(m && (m.bankrupt || spendableFor(m) < cost)){
+        showToast(`Not enough — ${minutes} min costs ${fmt(cost)}`);
+        return;
+      }
+      const hasPendingScreen = state.txns.some(t => t.member_id === memberId && t.status === "pending" && t.screen_minutes);
+      if(hasPendingScreen){
+        showToast("You already have a screen time request waiting");
+        return;
+      }
+      await supa.from("transactions").insert({
+        household_id: userId, member_id: memberId, type: "spend",
+        amount: -cost, description: `${minutes} min screen time`, status: "pending", screen_minutes: minutes
+      });
+      showToast(`Requested ${minutes} min screen time — waiting on the Banker`);
+      reload();
     });
-    showToast(`Requested ${minutes} min screen time — waiting on the Banker`);
-    reload();
   }
 
   // Cashes in a kid's entire banked (paid-for, not-yet-used) screen time
@@ -396,51 +525,84 @@
   // the "source of truth" — and it's what stops a kid from just closing
   // the tab to make more time appear later.
   async function startScreenSession(memberId){
-    const m = member(memberId);
-    const minutes = m.screen_minutes_balance || 0;
-    if(minutes <= 0) return;
-    const startedAt = new Date();
-    const endsAt = new Date(startedAt.getTime() + minutes * 60000);
-    await supa.from("screen_sessions").insert({
-      household_id: userId, member_id: memberId, minutes,
-      started_at: startedAt.toISOString(), ends_at: endsAt.toISOString(), status: "active"
+    return once("start:" + memberId, async () => {
+      // Only one running session per kid, checked against the server (not
+      // the in-memory copy) so a second device can't start a parallel one.
+      const { data: running } = await supa.from("screen_sessions").select("id")
+        .eq("member_id", memberId).in("status", ["active", "overtime"]).limit(1);
+      if(running && running.length){ showToast("Screen time is already running"); reload(); return; }
+      // Zero the bank first and use what was actually in it. Whoever gets
+      // here first takes the minutes; a double-tap finds an empty bank.
+      const taken = await adjustMember(memberId, cur =>
+        (cur.screen_minutes_balance || 0) > 0 ? { screen_minutes_balance: 0 } : null);
+      const minutes = taken && !taken.unchanged ? (taken.before.screen_minutes_balance || 0) : 0;
+      if(minutes <= 0){ reload(); return; }
+      const startedAt = new Date();
+      const endsAt = new Date(startedAt.getTime() + minutes * 60000);
+      const { error } = await supa.from("screen_sessions").insert({
+        household_id: userId, member_id: memberId, minutes,
+        started_at: startedAt.toISOString(), ends_at: endsAt.toISOString(), status: "active"
+      });
+      if(error){
+        await adjustMember(memberId, cur => ({ screen_minutes_balance: (cur.screen_minutes_balance || 0) + minutes }));
+        showToast("Couldn't start — your minutes are safe, try again");
+        reload();
+        return;
+      }
+      showToast(`Screen time started — ${minutes} min`);
+      reload();
     });
-    await supa.from("members").update({ screen_minutes_balance: 0 }).eq("id", memberId);
-    showToast(`Screen time started — ${minutes} min`);
-    reload();
   }
 
-  // Ends a session, whether that's a Banker/kid stopping it early (no
-  // overtime — now is still before ends_at) or someone finally stopping an
-  // overtime session that already blew past zero. The overtime minutes are
-  // costed at the household's rate and charged against tomorrow, not today,
-  // so the deduction lands as a real consequence the next time the store
-  // opens rather than an instant clawback of the purchase just made.
-  async function finishScreenSession(sessionId){
-    const session = state.sessions.find(s => s.id === sessionId);
-    if(!session) return;
-    const overtimeMinutes = Math.max(0, Math.ceil((Date.now() - new Date(session.ends_at).getTime()) / 60000));
-    await supa.from("screen_sessions").update({ status: "completed" }).eq("id", sessionId);
-    if(overtimeMinutes > 0){
-      await chargeOvertimeTomorrow(session.member_id, overtimeMinutes);
-      showToast(`Ended — ${overtimeMinutes} min overtime comes off tomorrow's balance`);
-    } else {
-      showToast("Screen time ended");
-    }
-    reload();
+  // Ends a session. Three situations:
+  //  - stopped early: whatever was left goes back in the kid's bank, so
+  //    stopping to eat dinner or an idle timeout never costs paid-for time
+  //  - ran out and kept going (overtime): the extra minutes are costed at the
+  //    household rate and charged against tomorrow, not today
+  //  - endedAtMs lets the idle auto-stop count time up to the last touch
+  //    instead of up to whenever the check finally noticed
+  async function finishScreenSession(sessionId, opts){
+    return once("finish:" + sessionId, async () => {
+      const endedAt = (opts && opts.endedAtMs) || Date.now();
+      // Claim the session so two taps or two devices can't both settle it
+      // (which is how a single overtime used to be charged twice).
+      const { data: claimed } = await supa.from("screen_sessions")
+        .update({ status: "completed" }).eq("id", sessionId).in("status", ["active", "overtime"]).select();
+      if(!claimed || !claimed.length){ reload(); return; }
+      const session = claimed[0];
+      const endsAtMs = new Date(session.ends_at).getTime();
+      if(endedAt < endsAtMs){
+        const unused = Math.floor((endsAtMs - endedAt) / 60000);
+        if(unused > 0){
+          await adjustMember(session.member_id, cur => ({ screen_minutes_balance: (cur.screen_minutes_balance || 0) + unused }));
+          showToast(`Stopped — ${unused} min put back in the bank`);
+        } else {
+          showToast("Screen time ended");
+        }
+      } else {
+        const overtimeMinutes = Math.ceil((endedAt - endsAtMs) / 60000);
+        if(overtimeMinutes > 0){
+          await chargeOvertimeTomorrow(session.member_id, overtimeMinutes);
+          showToast(`Ended — ${overtimeMinutes} min overtime comes off tomorrow's balance`);
+        } else {
+          showToast("Screen time ended");
+        }
+      }
+      reload();
+    });
   }
 
   async function chargeOvertimeTomorrow(memberId, minutes){
-    const m = member(memberId);
-    if(!m) return;
     const rate = Number(state.household.screen_time_rate) || 5; // minutes per $1
-    const cost = Math.round((minutes / rate) * 100) / 100;
+    const cost = round2(minutes / rate);
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    await supa.from("members").update({
-      pending_overtime_charge: Number(m.pending_overtime_charge || 0) + cost,
-      pending_overtime_charge_date: tomorrow.toISOString().slice(0, 10)
-    }).eq("id", memberId);
+    // adjustMember (not a blind overwrite) so two overtimes ending close
+    // together add up instead of one erasing the other.
+    await adjustMember(memberId, cur => ({
+      pending_overtime_charge: round2(Number(cur.pending_overtime_charge || 0) + cost),
+      pending_overtime_charge_date: localISO(tomorrow)
+    }));
   }
 
   // Runs on every reload — including from whatever other device/tab is also
@@ -450,9 +612,9 @@
   // still equals the exact amount we read, so whichever caller's write
   // lands first "wins" the charge, and the loser's update matches zero rows
   // and skips inserting a fine — instead of both of them charging it.
-  async function applyDueOvertimeCharges(){
-    const today = new Date().toISOString().slice(0, 10);
-    const due = state.members.filter(m =>
+  async function applyDueOvertimeCharges(members){
+    const today = localISO(new Date());
+    const due = members.filter(m =>
       Number(m.pending_overtime_charge) > 0 && m.pending_overtime_charge_date && m.pending_overtime_charge_date <= today
     );
     for(const m of due){
@@ -463,16 +625,19 @@
         .eq("pending_overtime_charge", cost)
         .select();
       if(!claimed || !claimed.length) continue; // another device already claimed this charge
-      const newBalance = Math.max(0, Number(m.current_balance) - cost);
-      const bankrupt = newBalance <= 0;
       await supa.from("transactions").insert({
         household_id: userId, member_id: m.id, type: "fine",
         amount: -cost, description: "Overtime screen time (yesterday)",
         status: "approved", resolved_at: new Date().toISOString()
       });
-      await supa.from("members").update({ current_balance: newBalance, bankrupt }).eq("id", m.id);
-      m.current_balance = newBalance;
-      m.bankrupt = bankrupt;
+      const result = await adjustMember(m.id, cur => {
+        const bal = Math.max(0, round2(Number(cur.current_balance) - cost));
+        return { current_balance: bal, bankrupt: bal <= 0 };
+      });
+      if(result){
+        m.current_balance = result.after.current_balance;
+        m.bankrupt = result.after.bankrupt;
+      }
       m.pending_overtime_charge = 0;
       m.pending_overtime_charge_date = null;
     }
@@ -509,16 +674,23 @@
   }
 
   async function markChoreDone(log){
-    await supa.from("chore_logs").update({ status: "submitted", submitted_at: new Date().toISOString() }).eq("id", log.id);
-    const rule = state.rules.find(r => r.id === log.assignment_rule_id);
-    const chore = rule && state.chores.find(c => c.id === rule.chore_id);
-    await supa.from("transactions").insert({
-      household_id: userId, member_id: log.assigned_member_id, type: "earn",
-      amount: chore ? chore.default_payout : 0, description: chore ? chore.title : "Assigned chore",
-      status: "pending", chore_log_id: log.id
+    return once("done:" + log.id, async () => {
+      // Claim the chore log first (pending -> submitted) so a double-tap
+      // can only ever create one payout request for it.
+      const { data: claimed } = await supa.from("chore_logs")
+        .update({ status: "submitted", submitted_at: new Date().toISOString() })
+        .eq("id", log.id).eq("status", "pending").select();
+      if(!claimed || !claimed.length){ reload(); return; }
+      const rule = state.rules.find(r => r.id === log.assignment_rule_id);
+      const chore = rule && state.chores.find(c => c.id === rule.chore_id);
+      await supa.from("transactions").insert({
+        household_id: userId, member_id: log.assigned_member_id, type: "earn",
+        amount: chore ? chore.default_payout : 0, description: chore ? chore.title : "Assigned chore",
+        status: "pending", chore_log_id: log.id
+      });
+      showToast("Marked done — waiting on the Banker");
+      reload();
     });
-    showToast("Marked done — waiting on the Banker");
-    reload();
   }
 
   async function addMember(name, role, emoji, pin){
@@ -535,7 +707,6 @@
   const SETUP_DONE_KEY = "mm_setup_done_v1";
 
   function render(){
-    lastActivityAt = Date.now();
     if(state.view === "login") renderLogin();
     else if(state.view === "setup") renderSetup();
     else if(state.view === "picker") renderPicker();
@@ -571,8 +742,16 @@
       const active = document.activeElement;
       const typing = active && ["INPUT", "SELECT", "TEXTAREA"].includes(active.tagName);
       const sheetOpen = document.querySelector(".overlay.open");
-      if(!typing && !sheetOpen) reload();
+      if(!typing && !sheetOpen && !document.hidden) reload(true);
     }, 15000);
+    // Coming back to the app (unlocking the phone, switching tabs) should
+    // show current data right away, not up to 15 seconds later.
+    if(!startAutoRefresh.wired){
+      startAutoRefresh.wired = true;
+      document.addEventListener("visibilitychange", () => {
+        if(!document.hidden && userId && state.view !== "login") reload(true);
+      });
+    }
   }
 
   // "Ryan left his timer running" safeguard: if the device showing his own
@@ -600,7 +779,9 @@
         const isOwnScreen = state.activeMemberId === el.dataset.memberId;
         if(isOwnScreen && !el.dataset.idleStopFired && (Date.now() - lastActivityAt) > IDLE_TIMEOUT_MS){
           el.dataset.idleStopFired = "1";
-          finishScreenSession(el.dataset.sessionId);
+          // Count time only up to the last touch, and (if it was still
+          // within the paid-for time) the unused minutes go back in the bank.
+          finishScreenSession(el.dataset.sessionId, { endedAtMs: lastActivityAt });
           return;
         }
         if(remainingMs <= 0){
@@ -877,29 +1058,41 @@
     } else if(state.kidTab === "shop"){
       const rate = Number(state.household.screen_time_rate) || 5;
       const storeOpen = isStoreOpen();
+      const spendable = spendableFor(m);
+      const pendingScreen = state.txns.some(t => t.member_id === m.id && t.status === "pending" && t.screen_minutes);
+      // Cap the stepper at what they can actually pay for (never below 5).
+      const maxMinutes = Math.max(5, Math.floor(spendable * rate / 5) * 5);
+      if(state.stMinutes == null || state.stMinutes < 5) state.stMinutes = 15;
+      if(state.stMinutes > maxMinutes) state.stMinutes = maxMinutes;
+      const canBuy = storeOpen && !m.bankrupt && !pendingScreen && spendable >= screenTimeCost(state.stMinutes);
+      const buyLabel = !storeOpen ? "Store's closed"
+        : m.bankrupt ? "Bankruptcy protection"
+        : pendingScreen ? "Request already waiting"
+        : spendable < screenTimeCost(state.stMinutes) ? "Not enough yet"
+        : `Request for <span id="stCost">${fmt(screenTimeCost(state.stMinutes))}</span>`;
       body += `<div class="card" style="text-align:center;margin-bottom:16px;${storeOpen ? "" : "background:var(--gold-light);"}">
         <div style="font-weight:800;${storeOpen ? "color:var(--green-dark);" : "color:var(--gold-dark);"}">${storeOpen ? "🟢 Store's open" : "🔒 Store's closed"}</div>
         <div style="font-size:0.78rem;color:var(--text-dim);margin-top:4px;">${STORE_HOURS_TEXT}</div>
       </div>`;
       body += `<div class="cat-label">Buy Screen Time</div>
         <div class="card" style="margin-bottom:16px;">
-          <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:10px;">$1 = ${rate} min</div>
+          <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:10px;">$1 = ${rate} min · you can spend ${fmt(Math.max(0, spendable))}</div>
           <div style="display:flex;align-items:center;gap:12px;justify-content:center;">
             <button class="pill-btn outline" id="stMinus" type="button" ${storeOpen ? "" : "disabled"}>−5</button>
             <div style="text-align:center;min-width:70px;">
-              <div style="font-size:1.4rem;font-weight:800;" id="stMinutes">15</div>
+              <div style="font-size:1.4rem;font-weight:800;" id="stMinutes">${state.stMinutes}</div>
               <div style="font-size:0.72rem;color:var(--text-dim);">minutes</div>
             </div>
             <button class="pill-btn outline" id="stPlus" type="button" ${storeOpen ? "" : "disabled"}>+5</button>
           </div>
-          <button class="primary-btn gold" id="stBuy" style="background:var(--gold);color:#3a2b05;" ${storeOpen ? "" : "disabled"}>${storeOpen ? `Request for <span id="stCost">${fmt(screenTimeCost(15))}</span>` : "Store's closed"}</button>
+          <button class="primary-btn gold" id="stBuy" style="background:var(--gold);color:#3a2b05;" ${canBuy ? "" : "disabled"}>${buyLabel}</button>
         </div>`;
       const byCat = {};
       state.rewards.forEach(r => { (byCat[r.category] = byCat[r.category] || []).push(r); });
       Object.keys(byCat).forEach(cat => {
         body += `<div class="cat-label">${escapeHtml(cat)}</div>`;
         byCat[cat].forEach(r => {
-          const afford = Number(m.current_balance) >= Number(r.cost) && !m.bankrupt;
+          const afford = spendable >= Number(r.cost) && !m.bankrupt;
           body += `<div class="item-row">
             <div class="title">${escapeHtml(r.title)}</div>
             <button class="pill-btn gold" data-spend="${r.id}" ${(afford && storeOpen) ? "" : "disabled"}>${fmt(r.cost)}</button>
@@ -967,17 +1160,13 @@
   function wireScreenTimeStepper(){
     const minutesEl = document.getElementById("stMinutes");
     if(!minutesEl) return;
-    const costEl = document.getElementById("stCost");
-    const buyBtn = document.getElementById("stBuy");
-    let minutes = 15;
-    const refresh = () => {
-      minutesEl.textContent = minutes;
-      costEl.textContent = fmt(screenTimeCost(minutes));
-      buyBtn.disabled = minutes <= 0;
-    };
-    document.getElementById("stMinus").addEventListener("click", () => { minutes = Math.max(5, minutes - 5); refresh(); });
-    document.getElementById("stPlus").addEventListener("click", () => { minutes += 5; refresh(); });
-    buyBtn.addEventListener("click", () => requestScreenTime(minutes, state.activeMemberId));
+    // The chosen amount lives in state so it survives a re-render instead of
+    // snapping back to 15 under the kid's thumb. Changing it re-renders the
+    // Shop (cheap, local) so the price, the affordability check and the
+    // button label all stay in agreement.
+    document.getElementById("stMinus").addEventListener("click", () => { state.stMinutes = Math.max(5, state.stMinutes - 5); render(); });
+    document.getElementById("stPlus").addEventListener("click", () => { state.stMinutes += 5; render(); });
+    document.getElementById("stBuy").addEventListener("click", () => requestScreenTime(state.stMinutes, state.activeMemberId));
   }
 
   // ------------------------------------------------------------- Banker desk
@@ -990,9 +1179,10 @@
       if(!pendingTxns.length) body = `<div class="empty-note">All caught up — nothing waiting on approval.</div>`;
       pendingTxns.forEach(t => {
         const m = member(t.member_id);
+        const dupCount = pendingTxns.filter(o => o.member_id === t.member_id && o.description === t.description).length;
         body += `<div class="item-row">
           <div><div class="title">${escapeHtml(m ? m.name : "?")} · ${escapeHtml(t.description)}</div>
-          <div class="sub">${t.type === "spend" ? "Purchase request" : "Chore submission"}</div></div>
+          <div class="sub">${t.type === "spend" ? "Purchase request" : "Chore submission"} · ${new Date(t.created_at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}${dupCount > 1 ? ` · <span style="color:var(--red);font-weight:700;">⚠ ${dupCount} identical — double tap?</span>` : ""}</div></div>
           <div style="display:flex;gap:6px;align-items:center;">
             <span class="price ${t.amount<0?"cost":""}">${t.amount<0?"-":"+"}${fmt(Math.abs(t.amount))}</span>
             <button class="pill-btn small" data-approve="${t.id}">✓</button>
