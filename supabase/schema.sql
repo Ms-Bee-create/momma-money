@@ -337,3 +337,7 @@ alter table public.members add column if not exists pending_overtime_charge_date
 alter table public.screen_sessions drop constraint if exists screen_sessions_status_check;
 alter table public.screen_sessions add constraint screen_sessions_status_check
   check (status in ('active', 'overtime', 'completed', 'cancelled'));
+
+-- Quick Fine: which parent gave a fine or award, so the kid's "you were
+-- fined" notice can say "from Dad". Optional — the app works without it.
+alter table public.transactions add column if not exists issued_by uuid references public.members (id) on delete set null;

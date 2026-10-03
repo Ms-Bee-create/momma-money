@@ -4,6 +4,12 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
 <title>Momma Money</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#1f6b4a" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<link rel="icon" type="image/png" href="icon-192.png" />
+<link rel="apple-touch-icon" href="icon-192.png" />
 <style>
   :root{
     --green:#1f6b4a; --green-dark:#164f37; --green-light:#e4f0e9;
@@ -151,6 +157,50 @@
   .member-row .who .avatar{font-size:1.6rem;}
   .member-row .who .name{font-weight:700;}
   .member-row .who .status{font-size:0.75rem;color:var(--text-dim);}
+
+  /* Quick fine / award */
+  .quick-kids{display:flex;gap:10px;flex-wrap:wrap;}
+  .quick-kid{
+    flex:1;min-width:140px;display:flex;flex-direction:row;align-items:center;gap:8px;
+    padding:8px 12px;border-radius:14px;border:2px solid var(--border);background:var(--panel);
+    font:inherit;font-weight:800;color:var(--text);cursor:pointer;
+  }
+  .quick-kid .avatar{font-size:1.5rem;}
+  .quick-kid small{margin-left:auto;font-size:0.74rem;font-weight:600;color:var(--text-dim);}
+  .quick-kid.selected{border-color:var(--green);background:var(--green-light);}
+  .quick-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .quick-btn{
+    display:flex;flex-direction:column;justify-content:space-between;gap:6px;text-align:left;
+    min-height:68px;padding:12px;border-radius:14px;border:1px solid var(--border);
+    font:inherit;font-size:0.86rem;font-weight:700;color:var(--text);cursor:pointer;
+  }
+  .quick-btn b{font-size:1rem;}
+  .quick-btn.bad{background:var(--red-light);border-color:#efc4c0;}
+  .quick-btn.bad b{color:var(--red);}
+  .quick-btn.good{background:var(--green-light);border-color:#bcd9c9;}
+  .quick-btn.good b{color:var(--green-dark);}
+  .quick-btn:active{transform:scale(0.97);}
+  .link-btn{background:none;border:none;color:var(--green);font:inherit;font-size:0.82rem;font-weight:700;padding:10px 2px;cursor:pointer;text-decoration:underline;}
+
+  .undo-bar{
+    position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);width:calc(100% - 32px);max-width:480px;
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+    background:var(--green-dark);color:#fff;padding:12px 14px;border-radius:14px;font-size:0.86rem;font-weight:600;
+    opacity:0;pointer-events:none;transition:all .25s;z-index:90;
+  }
+  .undo-bar.show{opacity:1;pointer-events:auto;transform:translate(-50%,0);}
+  .undo-bar button{border:none;background:var(--gold);color:#3a2b05;font:inherit;font-weight:800;padding:8px 14px;border-radius:999px;cursor:pointer;flex-shrink:0;}
+
+  .notice-overlay{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .notice-overlay.bad{background:rgba(140,40,34,0.94);}
+  .notice-overlay.good{background:rgba(24,90,60,0.94);}
+  .notice-card{background:var(--cream);border-radius:22px;padding:24px 20px;width:100%;max-width:380px;text-align:center;}
+  .notice-emoji{font-size:3rem;}
+  .notice-card h2{margin:6px 0 14px;font-size:1.4rem;}
+  .notice-row{display:flex;justify-content:space-between;gap:12px;text-align:left;padding:10px 0;border-top:1px solid var(--border);font-size:0.95rem;}
+  .notice-bal{margin-top:12px;font-weight:700;color:var(--text-dim);}
+  .device-note{margin:26px 0 0;text-align:center;font-size:0.78rem;color:var(--text-dim);}
+  .device-note button{background:none;border:none;color:var(--green);font:inherit;font-size:0.78rem;font-weight:700;text-decoration:underline;cursor:pointer;padding:2px;}
 </style>
 </head>
 <body>
@@ -293,10 +343,27 @@
 
   function member(id){ return state.members.find(m => m.id === id); }
   function activeMember(){ return member(state.activeMemberId); }
+
+  // The first parent profile is the household owner (lands on Approvals).
+  // Any other parent (Dad) lands on Quick, because what they come for is a
+  // fast fine or award, not a queue to work through.
+  function isOwnerBanker(m){
+    const bankers = state.members.filter(x => x.role === "banker");
+    return bankers.length ? bankers[0].id === m.id : true;
+  }
   function enterProfile(m){
     state.activeMemberId = m.id;
     state.view = "home";
-    state.kidTab = m.role === "banker" ? "approvals" : "chores";
+    state.kidTab = m.role === "banker" ? (isOwnerBanker(m) ? "approvals" : "quick") : "chores";
+  }
+
+  // "This phone opens straight to Dad": remembered per device, so Dad's
+  // Samsung goes icon -> Quick Fine with no sign-in screen, profile picker
+  // or PIN in between.
+  const DEVICE_PROFILE_KEY = "mm_device_profile_v1";
+  function getDeviceProfile(){ try{ return localStorage.getItem(DEVICE_PROFILE_KEY); }catch(e){ return null; } }
+  function setDeviceProfile(id){
+    try{ if(id) localStorage.setItem(DEVICE_PROFILE_KEY, id); else localStorage.removeItem(DEVICE_PROFILE_KEY); }catch(e){}
   }
   function fmt(n){ return "$" + Number(n || 0).toFixed(2); }
   function activeSessionFor(memberId){
@@ -374,10 +441,14 @@
   // ===========================================================================
   // Mutations
   // ===========================================================================
-  async function approveTransaction(txn){
+  // opts.quiet = caller handles the toast/refresh itself (Quick Fine does
+  // several in a row and shows one combined message). Returns the member's
+  // before/after rows on success so a caller can offer an exact undo.
+  async function approveTransaction(txn, opts){
+    const quiet = !!(opts && opts.quiet);
     return once("approve:" + txn.id, async () => {
       const m = member(txn.member_id);
-      if(!m) return;
+      if(!m) return null;
       const amount = Number(txn.amount);
       const fresh = await supa.from("members").select("current_balance").eq("id", m.id).maybeSingle();
       // A purchase has to be covered by the balance. A fine can overdraw
@@ -385,7 +456,7 @@
       // can't afford used to floor them at $0 and hand over the item free.
       if(txn.type === "spend" && fresh.data && Number(fresh.data.current_balance) + amount < 0){
         showToast(`Can't approve — ${m.name} only has ${fmt(fresh.data.current_balance)}`);
-        return;
+        return null;
       }
       // Claim the request first. If someone else (or a second tap) already
       // approved or declined it, this matches nothing and we stop — that is
@@ -394,9 +465,8 @@
         .update({ status: "approved", resolved_at: new Date().toISOString() })
         .eq("id", txn.id).eq("status", "pending").select();
       if(!claimed || !claimed.length){
-        showToast("Already handled");
-        reload();
-        return;
+        if(!quiet){ showToast("Already handled"); reload(); }
+        return null;
       }
       // Approving a screen-time purchase banks the minutes rather than
       // starting them immediately — the kid (or Banker) starts the actual
@@ -412,15 +482,17 @@
       });
       if(!result){
         await supa.from("transactions").update({ status: "pending", resolved_at: null }).eq("id", txn.id);
-        showToast("Couldn't update the balance — try again");
-        reload();
-        return;
+        if(!quiet){ showToast("Couldn't update the balance — try again"); reload(); }
+        return null;
       }
       if(txn.chore_log_id){
         await supa.from("chore_logs").update({ status: "approved", approved_at: new Date().toISOString() }).eq("id", txn.chore_log_id);
       }
-      showToast(`Approved — ${m.name}'s new balance ${fmt(result.after.current_balance)}`);
-      reload();
+      if(!quiet){
+        showToast(`Approved — ${m.name}'s new balance ${fmt(result.after.current_balance)}`);
+        reload();
+      }
+      return { before: result.before, after: result.after };
     });
   }
 
@@ -649,15 +721,149 @@
     reload();
   }
 
+  // Inserts a transaction, recording which parent issued it when the
+  // issued_by column exists. If the column hasn't been added to the database
+  // yet, retry without it so fining never breaks over a missing migration.
+  async function insertTxn(row){
+    let res = await supa.from("transactions").insert(row).select().single();
+    if(res.error && "issued_by" in row && /issued_by/i.test(res.error.message || "")){
+      const rest = Object.assign({}, row);
+      delete rest.issued_by;
+      res = await supa.from("transactions").insert(rest).select().single();
+    }
+    return res;
+  }
+
   async function issueFine(fine, memberId, customTitle, customAmount){
-    const m = member(memberId);
     const amount = -Math.abs(customAmount != null ? customAmount : fine.amount);
     const title = customTitle || fine.title;
-    const { data } = await supa.from("transactions").insert({
+    const { data } = await insertTxn({
       household_id: userId, member_id: memberId, type: "fine",
-      amount, description: title, status: "pending"
-    }).select().single();
+      amount, description: title, status: "pending", issued_by: state.activeMemberId
+    });
     if(data) await approveTransaction(data);
+  }
+
+  // ---------------------------------------------------------------- Quick
+  // One tap from a parent: fine or award one or more kids right now, no
+  // approval queue (the parent IS the approval). Each one is applied through
+  // the same approve path as everything else, so balances, bankruptcy and
+  // the double-tap guards all behave identically.
+  async function quickIssue(kind, label, amount, kidIds){
+    if(!kidIds.length){ showToast("Tap who it's for first"); return; }
+    return once("quick:" + kind + ":" + label + ":" + kidIds.join(","), async () => {
+      const done = [];
+      for(const kidId of kidIds){
+        const signed = kind === "fine" ? -Math.abs(amount) : Math.abs(amount);
+        const { data } = await insertTxn({
+          household_id: userId, member_id: kidId, type: kind === "fine" ? "fine" : "earn",
+          amount: signed, description: label, status: "pending", issued_by: state.activeMemberId
+        });
+        if(!data) continue;
+        const info = await approveTransaction(data, { quiet: true });
+        if(info) done.push({ txnId: data.id, kidId, before: info.before, after: info.after });
+      }
+      await reload();
+      if(!done.length){ showToast("Couldn't save that — try again"); return; }
+      const names = done.map(d => (member(d.kidId) || {}).name).filter(Boolean).join(" & ");
+      const verb = kind === "fine" ? `Fined ${names} ${fmt(Math.abs(amount))}` : `Gave ${names} ${fmt(Math.abs(amount))}`;
+      showUndoBar(`${verb} — ${label}`, () => undoQuick(done));
+    });
+  }
+
+  // Undo only restores the exact balance from before, and only if nothing
+  // else has touched that kid since — otherwise it would overwrite someone
+  // else's change, so it refuses and says so.
+  async function undoQuick(done){
+    let failed = 0;
+    for(const d of done){
+      const { data: claimed } = await supa.from("transactions")
+        .update({ status: "rejected", resolved_at: new Date().toISOString() })
+        .eq("id", d.txnId).eq("status", "approved").select();
+      if(!claimed || !claimed.length){ failed++; continue; }
+      const restored = await adjustMember(d.kidId, cur =>
+        Number(cur.current_balance) === Number(d.after.current_balance)
+          ? { current_balance: d.before.current_balance, bankrupt: d.before.bankrupt } : null);
+      if(!restored || restored.unchanged){
+        await supa.from("transactions").update({ status: "approved" }).eq("id", d.txnId);
+        failed++;
+      }
+    }
+    showToast(failed ? "Couldn't undo — their balance changed since" : "Undone");
+    reload();
+  }
+
+  let undoTimer = null;
+  function showUndoBar(text, onUndo){
+    let bar = document.getElementById("undoBar");
+    if(!bar){
+      bar = document.createElement("div");
+      bar.id = "undoBar";
+      bar.className = "undo-bar";
+      document.body.appendChild(bar);
+    }
+    bar.innerHTML = `<span></span><button type="button">Undo</button>`;
+    bar.firstChild.textContent = text;
+    bar.classList.add("show");
+    clearTimeout(undoTimer);
+    const hide = () => bar.classList.remove("show");
+    bar.querySelector("button").onclick = () => { hide(); clearTimeout(undoTimer); onUndo(); };
+    undoTimer = setTimeout(hide, 9000);
+  }
+
+  // ------------------------------------------------- "You were fined" notice
+  // A fine that the kid never sees teaches nothing, and a parent who sees no
+  // reaction stops bothering. When a kid opens their own profile on a device,
+  // anything a parent fined or awarded since they last looked is shown full
+  // screen once. Tracked per device, and the first visit on a device doesn't
+  // replay history.
+  function maybeShowKidNotice(m){
+    if(document.getElementById("kidNotice")) return;
+    const key = "mm_notice_ack_" + m.id;
+    let ack = 0;
+    try{ ack = Number(localStorage.getItem(key)) || 0; }catch(e){}
+    if(!ack){
+      try{ localStorage.setItem(key, String(Date.now())); }catch(e){}
+      return;
+    }
+    const fresh = state.txns.filter(t =>
+      t.member_id === m.id && t.status === "approved" && t.resolved_at &&
+      (t.type === "fine" || (t.type === "earn" && t.issued_by)) &&
+      new Date(t.resolved_at).getTime() > ack
+    ).sort((a, b) => new Date(a.resolved_at) - new Date(b.resolved_at));
+    if(!fresh.length) return;
+    const hasFine = fresh.some(t => t.type === "fine");
+    const rows = fresh.map(t => {
+      const by = t.issued_by && member(t.issued_by) ? ` · from ${escapeHtml(member(t.issued_by).name)}` : "";
+      return `<div class="notice-row"><span>${escapeHtml(t.description)}${by}</span><b>${t.amount < 0 ? "−" : "+"}${fmt(Math.abs(t.amount))}</b></div>`;
+    }).join("");
+    const overlay = document.createElement("div");
+    overlay.id = "kidNotice";
+    overlay.className = "notice-overlay " + (hasFine ? "bad" : "good");
+    overlay.innerHTML = `<div class="notice-card">
+      <div class="notice-emoji">${hasFine ? "⚠️" : "🌟"}</div>
+      <h2>${hasFine ? "Heads up" : "Nice work!"}</h2>
+      ${rows}
+      <div class="notice-bal">Your balance: ${fmt(m.current_balance)}</div>
+      <button class="primary-btn" type="button">OK</button>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector("button").addEventListener("click", () => {
+      const newest = Math.max.apply(null, fresh.map(t => new Date(t.resolved_at).getTime()));
+      try{ localStorage.setItem(key, String(newest)); }catch(e){}
+      overlay.remove();
+    });
+    try{
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = hasFine ? "square" : "sine";
+      osc.frequency.value = hasFine ? 220 : 660;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(); osc.stop(ctx.currentTime + 0.55);
+    }catch(e){}
   }
 
   async function assignChore(chore, memberId){
@@ -950,14 +1156,14 @@
 
   function renderPicker(){
     const kids = state.members.filter(m => m.role === "kid");
-    const banker = state.members.find(m => m.role === "banker");
+    const bankers = state.members.filter(m => m.role === "banker");
     let cards = "";
-    if(banker){
+    bankers.forEach(banker => {
       cards += `<button class="profile-card banker" data-id="${banker.id}">
         <span class="avatar">${banker.avatar_emoji}</span>${escapeHtml(banker.name)}
-        <span class="bal">Banker</span>
+        <span class="bal">Parent</span>
       </button>`;
-    }
+    });
     kids.forEach(k => {
       cards += `<button class="profile-card${k.bankrupt ? " bankrupt" : ""}" data-id="${k.id}">
         <span class="avatar">${k.avatar_emoji}</span>${escapeHtml(k.name)}
@@ -971,7 +1177,12 @@
       <div class="kicker">Who's using the app?</div>
       <h2>Pick your profile</h2>
       <div class="profile-grid">${cards}</div>
+      ${getDeviceProfile() && member(getDeviceProfile())
+        ? `<div class="device-note">This device opens straight to ${escapeHtml(member(getDeviceProfile()).name)}. <button type="button" id="clearDeviceProfile">Stop doing that</button></div>`
+        : ""}
     `;
+    const clearDeviceBtn = document.getElementById("clearDeviceProfile");
+    if(clearDeviceBtn) clearDeviceBtn.addEventListener("click", () => { setDeviceProfile(null); showToast("Back to asking who's using it"); render(); });
     app.querySelectorAll(".profile-card[data-id]").forEach(btn => {
       btn.addEventListener("click", () => {
         const m = member(btn.dataset.id);
@@ -1129,8 +1340,18 @@
         <button class="tab-btn ${state.kidTab==="activity"?"active":""}" data-tab="activity">Activity</button>
       </div>
       ${body}
+      <div class="device-note">${getDeviceProfile() === m.id
+        ? `This device opens straight to ${escapeHtml(m.name)}. <button type="button" id="deviceProfileToggle">Stop doing that</button>`
+        : `<button type="button" id="deviceProfileToggle">Always open as ${escapeHtml(m.name)} on this device</button>`}</div>
     `;
     wireKidHome();
+    const kidDeviceToggle = document.getElementById("deviceProfileToggle");
+    if(kidDeviceToggle) kidDeviceToggle.addEventListener("click", () => {
+      setDeviceProfile(getDeviceProfile() === m.id ? null : m.id);
+      showToast(getDeviceProfile() === m.id ? `This device now opens as ${m.name}` : "Back to asking who's using it");
+      render();
+    });
+    maybeShowKidNotice(m);
   }
 
   function wireKidHome(){
@@ -1170,12 +1391,100 @@
   }
 
   // ------------------------------------------------------------- Banker desk
+  // Quick tab: pick who, tap what. The kid selection is remembered on this
+  // device, so the usual case (same kid again) is a single tap. Most-used
+  // fines and awards float to the top; the rest are behind "show all".
+  const QUICK_KIDS_KEY = "mm_quick_kids_v1";
+  function quickSelectedKids(kids){
+    if(state.quickKids == null){
+      let saved = [];
+      try{ saved = JSON.parse(localStorage.getItem(QUICK_KIDS_KEY) || "[]"); }catch(e){}
+      state.quickKids = saved.filter(id => kids.some(k => k.id === id));
+      if(!state.quickKids.length && kids.length === 1) state.quickKids = [kids[0].id];
+    }
+    return state.quickKids;
+  }
+  function renderQuickBody(me){
+    const kids = state.members.filter(m => m.role === "kid");
+    if(!kids.length) return `<div class="empty-note">Add a kid first (Manage tab).</div>`;
+    const selected = quickSelectedKids(kids);
+    const used = {};
+    state.txns.forEach(t => { used[t.description] = (used[t.description] || 0) + 1; });
+    const byUse = (a, b) => (used[b] || 0) - (used[a] || 0);
+    const fines = state.fines.slice().sort((a, b) => byUse(a.title, b.title) || a.title.localeCompare(b.title));
+    const awards = state.chores.slice().sort((a, b) => byUse(a.title, b.title) || a.title.localeCompare(b.title));
+    const showFines = state.quickAllFines ? fines : fines.slice(0, 6);
+    const showAwards = state.quickAllAwards ? awards : awards.slice(0, 6);
+
+    let html = "";
+    if(!isOwnerBanker(me) && getDeviceProfile() !== me.id && !localStorage.getItem("mm_device_prompt_" + me.id)){
+      html += `<div class="card" style="background:var(--gold-light);">
+        <div style="font-weight:800;margin-bottom:4px;">Make this phone open straight to ${escapeHtml(me.name)}?</div>
+        <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:10px;">Skips the profile picker every time, so fining is open → tap → done.</div>
+        <button class="pill-btn" id="devicePromptYes" type="button">Yes, do that</button>
+        <button class="pill-btn outline" id="devicePromptNo" type="button">Not now</button>
+      </div>`;
+    }
+    html += `<div class="cat-label" style="margin-top:0;">Who is it for?</div>
+      <div class="quick-kids">${kids.map(k => `<button type="button" class="quick-kid${selected.includes(k.id) ? " selected" : ""}" data-quick-kid="${k.id}">
+        <span class="avatar">${k.avatar_emoji}</span><span>${escapeHtml(k.name)}</span><small>${k.bankrupt ? "bankrupt" : fmt(k.current_balance)}</small>
+      </button>`).join("")}</div>`;
+
+    html += `<div class="cat-label">Fine</div><div class="quick-grid">${showFines.map(f =>
+      `<button type="button" class="quick-btn bad" data-quick-fine="${f.id}"><span>${escapeHtml(f.title)}</span><b>−${fmt(f.amount)}</b></button>`).join("")}</div>`;
+    if(fines.length > 6) html += `<button type="button" class="link-btn" id="quickMoreFines">${state.quickAllFines ? "Show fewer" : `Show all ${fines.length} fines`}</button>`;
+
+    html += `<div class="cat-label">Award</div><div class="quick-grid">${showAwards.map(c =>
+      `<button type="button" class="quick-btn good" data-quick-award="${c.id}"><span>${escapeHtml(c.title)}</span><b>+${fmt(c.default_payout)}</b></button>`).join("")}</div>`;
+    if(awards.length > 6) html += `<button type="button" class="link-btn" id="quickMoreAwards">${state.quickAllAwards ? "Show fewer" : `Show all ${awards.length} awards`}</button>`;
+
+    html += `<button type="button" class="pill-btn outline" id="quickCustom" style="margin-top:14px;">＋ Something else (custom)</button>`;
+    return html;
+  }
+
+  function openQuickCustomSheet(){
+    const selected = state.quickKids || [];
+    if(!selected.length){ showToast("Tap who it's for first"); return; }
+    openSheet(`
+      <div class="sheet-header"><h2>Custom</h2><button class="sheet-close">&times;</button></div>
+      <div class="choice-row">
+        <button class="choice-chip selected" data-kind="fine">Fine</button>
+        <button class="choice-chip" data-kind="award">Award</button>
+      </div>
+      <label class="field-label">Reason</label>
+      <input type="text" id="qcReason" placeholder="What happened" />
+      <label class="field-label">Amount ($)</label>
+      <input type="number" id="qcAmount" step="0.25" min="0" placeholder="2.00" />
+      <button class="primary-btn" id="qcSave">Do it</button>
+    `, (overlay, close) => {
+      let kind = "fine";
+      overlay.querySelectorAll("[data-kind]").forEach(chip => chip.addEventListener("click", () => {
+        overlay.querySelectorAll("[data-kind]").forEach(c => c.classList.remove("selected"));
+        chip.classList.add("selected"); kind = chip.dataset.kind;
+      }));
+      const reasonInput = overlay.querySelector("#qcReason");
+      const amountInput = overlay.querySelector("#qcAmount");
+      reasonInput.addEventListener("input", () => clearInvalid(reasonInput));
+      amountInput.addEventListener("input", () => clearInvalid(amountInput));
+      overlay.querySelector("#qcSave").addEventListener("click", () => {
+        const reason = reasonInput.value.trim();
+        const amount = parseFloat(amountInput.value);
+        if(!reason){ markInvalid(reasonInput, "Say what it's for"); return; }
+        if(!amount || amount <= 0){ markInvalid(amountInput, "Enter an amount over $0"); return; }
+        close();
+        quickIssue(kind, reason, amount, (state.quickKids || []).slice());
+      });
+    });
+  }
+
   function renderBankerDesk(){
-    if(!["approvals","household","history","manage"].includes(state.kidTab)) state.kidTab = "approvals";
+    if(!["quick","approvals","household","history","manage"].includes(state.kidTab)) state.kidTab = "approvals";
     const pendingTxns = state.txns.filter(t => t.status === "pending");
     let body = "";
 
-    if(state.kidTab === "approvals"){
+    if(state.kidTab === "quick"){
+      body = renderQuickBody(activeMember());
+    } else if(state.kidTab === "approvals"){
       if(!pendingTxns.length) body = `<div class="empty-note">All caught up — nothing waiting on approval.</div>`;
       pendingTxns.forEach(t => {
         const m = member(t.member_id);
@@ -1269,6 +1578,31 @@
           </div>
         </div>`;
 
+      body += `<div class="cat-label">Family profiles</div>`;
+      state.members.forEach(p => {
+        body += `<div class="member-row">
+          <div class="who"><span class="avatar">${p.avatar_emoji}</span>
+            <div><div class="name">${escapeHtml(p.name)}</div>
+            <div class="status">${p.role === "banker" ? "Parent" : "Kid"}${p.pin ? " · PIN set" : ""}</div></div>
+          </div>
+          <button class="pill-btn small outline" data-edit-member="${p.id}">Edit</button>
+        </div>`;
+      });
+      body += `<button class="pill-btn" id="addParentBtn" style="margin:8px 0 22px;">+ Add a parent (like Dad)</button>`;
+
+      const meHere = activeMember();
+      body += `<div class="cat-label">This device</div>
+        <div class="card">
+          <div style="font-size:0.85rem;color:var(--text-dim);margin-bottom:10px;">
+            ${getDeviceProfile() && member(getDeviceProfile())
+              ? `This device opens straight to <b>${escapeHtml(member(getDeviceProfile()).name)}</b> — no profile picker.`
+              : "This device asks who's using it each time."}
+          </div>
+          <button class="pill-btn outline" id="deviceProfileMgmt" type="button">${getDeviceProfile() === (meHere && meHere.id)
+            ? "Stop opening straight to this profile"
+            : `Open straight to ${escapeHtml(meHere ? meHere.name : "this profile")} on this device`}</button>
+        </div>`;
+
       body += `<div class="cat-label">Account</div>`;
       if(state.authUser && state.authUser.is_anonymous === false){
         body += `<div class="card">
@@ -1298,6 +1632,7 @@
       <div class="kicker">Banker's Desk</div>
       <h2>Run the household</h2>
       <div class="tab-row">
+        <button class="tab-btn ${state.kidTab==="quick"?"active":""}" data-tab="quick">⚡ Quick</button>
         <button class="tab-btn ${state.kidTab==="approvals"?"active":""}" data-tab="approvals">Approvals${pendingTxns.length ? ` (${pendingTxns.length})` : ""}</button>
         <button class="tab-btn ${state.kidTab==="household"?"active":""}" data-tab="household">Household</button>
         <button class="tab-btn ${state.kidTab==="history"?"active":""}" data-tab="history">History</button>
@@ -1337,10 +1672,56 @@
       if(!rate || rate <= 0) return;
       setScreenTimeRate(rate);
     });
+    // ---- Quick tab
+    app.querySelectorAll("[data-quick-kid]").forEach(btn => btn.addEventListener("click", () => {
+      const id = btn.dataset.quickKid;
+      state.quickKids = (state.quickKids || []).includes(id)
+        ? state.quickKids.filter(x => x !== id) : (state.quickKids || []).concat(id);
+      try{ localStorage.setItem(QUICK_KIDS_KEY, JSON.stringify(state.quickKids)); }catch(e){}
+      render();
+    }));
+    app.querySelectorAll("[data-quick-fine]").forEach(btn => btn.addEventListener("click", () => {
+      const f = state.fines.find(x => x.id === btn.dataset.quickFine);
+      if(f) quickIssue("fine", f.title, Number(f.amount), (state.quickKids || []).slice());
+    }));
+    app.querySelectorAll("[data-quick-award]").forEach(btn => btn.addEventListener("click", () => {
+      const c = state.chores.find(x => x.id === btn.dataset.quickAward);
+      if(c) quickIssue("award", c.title, Number(c.default_payout), (state.quickKids || []).slice());
+    }));
+    const moreFines = document.getElementById("quickMoreFines");
+    if(moreFines) moreFines.addEventListener("click", () => { state.quickAllFines = !state.quickAllFines; render(); });
+    const moreAwards = document.getElementById("quickMoreAwards");
+    if(moreAwards) moreAwards.addEventListener("click", () => { state.quickAllAwards = !state.quickAllAwards; render(); });
+    const quickCustom = document.getElementById("quickCustom");
+    if(quickCustom) quickCustom.addEventListener("click", openQuickCustomSheet);
+    const devYes = document.getElementById("devicePromptYes");
+    if(devYes) devYes.addEventListener("click", () => {
+      setDeviceProfile(state.activeMemberId);
+      showToast("Done — this phone now opens straight here");
+      render();
+    });
+    const devNo = document.getElementById("devicePromptNo");
+    if(devNo) devNo.addEventListener("click", () => {
+      try{ localStorage.setItem("mm_device_prompt_" + state.activeMemberId, "1"); }catch(e){}
+      render();
+    });
+
+    // ---- Manage tab: profiles + this device
+    app.querySelectorAll("[data-edit-member]").forEach(btn => btn.addEventListener("click", () => openEditMemberSheet(btn.dataset.editMember)));
+    const addParentBtn = document.getElementById("addParentBtn");
+    if(addParentBtn) addParentBtn.addEventListener("click", () => openAddMemberSheet("banker"));
+    const deviceMgmt = document.getElementById("deviceProfileMgmt");
+    if(deviceMgmt) deviceMgmt.addEventListener("click", () => {
+      setDeviceProfile(getDeviceProfile() === state.activeMemberId ? null : state.activeMemberId);
+      showToast(getDeviceProfile() ? "This device now opens straight to this profile" : "Back to asking who's using it");
+      render();
+    });
+
     const signOutBtn = document.getElementById("signOutBtn");
     if(signOutBtn) signOutBtn.addEventListener("click", async () => {
       if(!confirm("Sign out of this account on this device?")) return;
       clearInterval(autoRefreshInterval);
+      setDeviceProfile(null);
       await supa.auth.signOut();
       state.activeMemberId = null;
       state.authUser = null;
@@ -1458,22 +1839,32 @@
     if(wireFn) wireFn(overlay, close);
   }
 
-  function openAddMemberSheet(){
-    const emojis = ["🙂","👦","👧","🧒","👶","🦸","🐯","🌟"];
+  function openAddMemberSheet(defaultRole){
+    const emojis = ["🙂","👦","👧","🧒","👶","🦸","🐯","🌟","👨","👩"];
+    const startRole = defaultRole === "banker" ? "banker" : "kid";
     openSheet(`
       <div class="sheet-header"><h2>Add family member</h2><button class="sheet-close">&times;</button></div>
+      <label class="field-label">Who is this?</label>
+      <div class="choice-row">
+        <button class="choice-chip${startRole === "kid" ? " selected" : ""}" data-role="kid">A kid</button>
+        <button class="choice-chip${startRole === "banker" ? " selected" : ""}" data-role="banker">A parent (can fine &amp; award)</button>
+      </div>
       <label class="field-label">Name</label>
-      <input type="text" id="mName" placeholder="Sally" />
+      <input type="text" id="mName" placeholder="${startRole === "banker" ? "Dad" : "Sally"}" />
       <label class="field-label">Avatar</label>
       <div class="choice-row">${emojis.map((e,i) => `<button class="choice-chip${i===0?" selected":""}" data-emoji="${e}">${e}</button>`).join("")}</div>
       <label class="field-label">PIN (optional, 4 digits)</label>
       <input type="text" id="mPin" maxlength="4" inputmode="numeric" placeholder="e.g. 1234" />
       <button class="primary-btn" id="mSave">Add member</button>
     `, (overlay, close) => {
-      let chosen = emojis[0];
+      let chosen = emojis[0], role = startRole;
       overlay.querySelectorAll("[data-emoji]").forEach(chip => chip.addEventListener("click", () => {
         overlay.querySelectorAll("[data-emoji]").forEach(c => c.classList.remove("selected"));
         chip.classList.add("selected"); chosen = chip.dataset.emoji;
+      }));
+      overlay.querySelectorAll("[data-role]").forEach(chip => chip.addEventListener("click", () => {
+        overlay.querySelectorAll("[data-role]").forEach(c => c.classList.remove("selected"));
+        chip.classList.add("selected"); role = chip.dataset.role;
       }));
       const nameInput = overlay.querySelector("#mName");
       nameInput.addEventListener("input", () => clearInvalid(nameInput));
@@ -1482,8 +1873,43 @@
         if(!name){ markInvalid(nameInput, "Enter a name first"); return; }
         const pin = overlay.querySelector("#mPin").value.trim();
         if(pin.length > 0 && pin.length !== 4){ markInvalid(overlay.querySelector("#mPin"), "PIN must be exactly 4 digits"); return; }
-        addMember(name, "kid", chosen, pin.length === 4 ? pin : null);
+        addMember(name, role, chosen, pin.length === 4 ? pin : null);
         close();
+      });
+    });
+  }
+
+  // Rename / change PIN / change avatar for anyone. Mostly so the default
+  // "Banker" profile can become "Mom" now that there is also a "Dad".
+  function openEditMemberSheet(memberId){
+    const m = member(memberId);
+    if(!m) return;
+    const emojis = ["🙂","👦","👧","🧒","👶","🦸","🐯","🌟","👨","👩"];
+    openSheet(`
+      <div class="sheet-header"><h2>Edit ${escapeHtml(m.name)}</h2><button class="sheet-close">&times;</button></div>
+      <label class="field-label">Name</label>
+      <input type="text" id="eName" value="${escapeHtml(m.name)}" />
+      <label class="field-label">Avatar</label>
+      <div class="choice-row">${emojis.map(e => `<button class="choice-chip${e === m.avatar_emoji ? " selected" : ""}" data-emoji="${e}">${e}</button>`).join("")}</div>
+      <label class="field-label">PIN (4 digits, leave empty for none)</label>
+      <input type="text" id="ePin" maxlength="4" inputmode="numeric" value="${escapeHtml(m.pin || "")}" />
+      <button class="primary-btn" id="eSave">Save</button>
+    `, (overlay, close) => {
+      let chosen = m.avatar_emoji;
+      overlay.querySelectorAll("[data-emoji]").forEach(chip => chip.addEventListener("click", () => {
+        overlay.querySelectorAll("[data-emoji]").forEach(c => c.classList.remove("selected"));
+        chip.classList.add("selected"); chosen = chip.dataset.emoji;
+      }));
+      const nameInput = overlay.querySelector("#eName");
+      nameInput.addEventListener("input", () => clearInvalid(nameInput));
+      overlay.querySelector("#eSave").addEventListener("click", async () => {
+        const name = nameInput.value.trim();
+        if(!name){ markInvalid(nameInput, "Enter a name"); return; }
+        const pin = overlay.querySelector("#ePin").value.trim();
+        if(pin.length > 0 && pin.length !== 4){ markInvalid(overlay.querySelector("#ePin"), "PIN must be exactly 4 digits"); return; }
+        await supa.from("members").update({ name, avatar_emoji: chosen, pin: pin.length === 4 ? pin : null }).eq("id", m.id);
+        showToast("Saved");
+        close(); reload();
       });
     });
   }
@@ -1596,8 +2022,19 @@
     if(!state.members.some(m => m.role === "kid") && !setupDone){
       state.view = "setup";
     }
+    // A device that was told "always open as Dad" skips the picker and PIN.
+    // The home-screen "Quick Fine" shortcut (#quick) lands on the Quick tab.
+    const deviceMember = getDeviceProfile() && member(getDeviceProfile());
+    if(deviceMember && state.view !== "setup"){
+      enterProfile(deviceMember);
+      if(deviceMember.role === "banker" && location.hash === "#quick") state.kidTab = "quick";
+    }
     render();
     startAutoRefresh();
+  }
+
+  if("serviceWorker" in navigator){
+    window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js").catch(() => {}); });
   }
 
   (async function boot(){
