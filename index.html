@@ -1304,9 +1304,13 @@
         body += `<div class="cat-label">${escapeHtml(cat)}</div>`;
         byCat[cat].forEach(r => {
           const afford = spendable >= Number(r.cost) && !m.bankrupt;
+          // Pets/accessories are one-per-kid: once bought (or requested) the button says so instead of letting a second one through.
+          const mineFor = st => r.grants && state.txns.some(t => t.member_id === m.id && t.reward_item_id === r.id && t.type === "spend" && t.status === st);
+          const ownedItem = mineFor("approved"), waitingItem = !ownedItem && mineFor("pending");
+          const btnLabel = ownedItem ? "Owned ✓" : waitingItem ? "Waiting…" : fmt(r.cost);
           body += `<div class="item-row">
             <div class="title">${escapeHtml(r.title)}</div>
-            <button class="pill-btn gold" data-spend="${r.id}" ${(afford && storeOpen) ? "" : "disabled"}>${fmt(r.cost)}</button>
+            <button class="pill-btn gold" data-spend="${r.id}" ${(afford && storeOpen && !ownedItem && !waitingItem) ? "" : "disabled"}>${btnLabel}</button>
           </div>`;
         });
       });
@@ -1771,7 +1775,7 @@
       categoryOptions: ["Big","Medium","Standard"],
       amountField: "amount", amountLabel: "Amount ($)" },
     reward: { table: "reward_items", label: "Reward", categoryField: "category",
-      categoryOptions: ["Screen & Media","Food & Treats","Privileges & Fun","Tangible Rewards"],
+      categoryOptions: ["Screen & Media","Food & Treats","Privileges & Fun","Tangible Rewards","Pets & Accessories"],
       amountField: "cost", amountLabel: "Cost ($)" }
   };
 

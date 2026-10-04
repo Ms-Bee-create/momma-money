@@ -115,7 +115,8 @@ create table if not exists public.reward_items (
   id uuid primary key default gen_random_uuid(),
   household_id uuid not null references public.households (id) on delete cascade,
   title text not null,
-  category text not null check (category in ('Screen & Media', 'Food & Treats', 'Privileges & Fun', 'Tangible Rewards')),
+  category text not null check (category in ('Screen & Media', 'Food & Treats', 'Privileges & Fun', 'Tangible Rewards', 'Pets & Accessories')),
+  grants text, -- what a purchase unlocks in Forge Academy, e.g. 'pet:girl' or 'acc:crown' (see pets.sql)
   cost numeric(10,2) not null,
   archived boolean not null default false,
   created_at timestamptz not null default now()
