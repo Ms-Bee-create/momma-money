@@ -1045,9 +1045,6 @@
         <input type="password" id="loginPassword" placeholder="Password" />
         <button class="primary-btn" id="loginBtn">Sign in</button>
       </div>
-      <div style="text-align:center;margin-top:16px;">
-        <button class="pill-btn outline" id="newHouseholdBtn">Set up a brand-new household instead</button>
-      </div>
     `;
     const emailInput = document.getElementById("loginEmail");
     const passwordInput = document.getElementById("loginPassword");
@@ -1065,11 +1062,6 @@
       await afterSignedIn(data.session);
     });
 
-    document.getElementById("newHouseholdBtn").addEventListener("click", async () => {
-      const { data, error } = await supa.auth.signInAnonymously();
-      if(error){ showToast("Couldn't start — check your connection"); return; }
-      await afterSignedIn(data.session);
-    });
   }
 
   function renderSetup(){
