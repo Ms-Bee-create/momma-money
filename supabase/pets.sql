@@ -25,6 +25,7 @@ cross join (values
     ('Pet: Fluffy Bunny', 4, 'pet:bunny'),
     ('Pet: Waddles the Penguin', 4, 'pet:penguin'),
     ('Pet: Bolt the Robot', 5, 'pet:bot'),
+    ('Pet: Orbit the Orb Bot', 6, 'pet:orbit'),
     ('Pet: Roomie the Roomba', 4, 'pet:roomba'),
     ('Pet: Flaggy 95', 5, 'pet:flag95'),
     ('Pet: Flaggy 98', 5, 'pet:flag98'),
