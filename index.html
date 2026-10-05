@@ -161,6 +161,31 @@
   .tab-btn.active{background:var(--green);border-color:var(--green);color:#fff;}
 
   .cat-label{font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);margin:16px 0 8px;}
+  /* Screen-time battery */
+  .battery{display:flex;align-items:center;justify-content:center;margin:6px auto 8px}
+  .bat-body{display:flex;gap:3px;padding:5px;border:3px solid #2f7d4f;border-radius:10px;background:#fff;width:200px;height:40px}
+  .bat-body i{flex:1;border-radius:3px;background:rgba(0,0,0,.07)}
+  .bat-tip{width:7px;height:16px;background:#2f7d4f;border-radius:0 4px 4px 0}
+  .battery.full .bat-body i.on{background:#3cb371}
+  .battery.mid .bat-body i.on{background:#f2b632}
+  .battery.low .bat-body i.on{background:#e0452d}
+  .battery.low,.battery.empty{animation:batPulse 1.4s ease-in-out infinite}
+  .battery.low .bat-body,.battery.empty .bat-body{border-color:#e0452d}.battery.low .bat-tip,.battery.empty .bat-tip{background:#e0452d}
+  @keyframes batPulse{50%{opacity:.6}}
+  .bat-note{font-weight:800;font-size:.85rem;color:#b3321d;margin:4px 0}
+  .bat-note[hidden]{display:none}
+  .battery[data-bat-theme="anna"] .bat-body{border-color:#ff4fa8;border-radius:18px;box-shadow:0 3px 8px rgba(214,38,140,.25)}
+  .battery[data-bat-theme="anna"] .bat-tip{background:#ff4fa8}
+  .battery[data-bat-theme="anna"].full .bat-body i.on{background:linear-gradient(#ff8fc7,#ff4fa8)}
+  .battery[data-bat-theme="anna"].mid .bat-body i.on{background:linear-gradient(#ffd27a,#ffa63d)}
+  .battery[data-bat-theme="anna"] .bat-body i{border-radius:8px}
+  .battery[data-bat-theme="ryan"] .bat-body{border-radius:0;border-color:#000;background:#000;box-shadow:inset 1px 1px #808080}
+  .battery[data-bat-theme="ryan"] .bat-tip{background:#000;border-radius:0}
+  .battery[data-bat-theme="ryan"] .bat-body i{border-radius:0;background:#222}
+  .battery[data-bat-theme="ryan"].full .bat-body i.on{background:#00ff66}
+  .battery[data-bat-theme="ryan"].mid .bat-body i.on{background:#ffd400}
+  body[data-kid="anna"] .bat-note{color:#d6268c}
+  body[data-kid="ryan"] .bat-note{font-family:"Courier New",monospace}
   /* Storefront shop */
   .storefront{border-radius:18px;overflow:hidden;margin-bottom:16px;background:var(--card,#fff);box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center}
   .storefront .awning{height:26px;background:repeating-linear-gradient(90deg,#e0562d 0 28px,#fff 28px 56px);border-bottom:4px solid rgba(0,0,0,.12);border-radius:0 0 14px 14px / 0 0 10px 10px}
@@ -717,20 +742,39 @@ var SHOP_SPRITE = [
   // and keeps counting UP in red, because anything played past zero is what
   // gets deducted from tomorrow's balance — the cost only exists if someone
   // actually has to stop it.
+  // The battery: 10 segments that drain as the minutes go. Same picture for
+  // the kid and the Banker; it just makes "how much is left" visible without
+  // reading numbers. Level classes: full / mid / low (<=5 min) / empty.
+  function batteryHtml(pct, theme, label){
+    const on = Math.ceil(Math.max(0, Math.min(100, pct)) / 10);
+    const lvl = pct <= 0 ? "empty" : pct <= 20 ? "low" : pct <= 50 ? "mid" : "full";
+    let segs = "";
+    for(let i = 0; i < 10; i++) segs += `<i class="${i < on ? "on" : ""}"></i>`;
+    return `<div class="battery ${lvl}" data-bat-theme="${theme}" role="img" aria-label="${label}">
+      <div class="bat-body">${segs}</div><div class="bat-tip"></div>
+    </div>`;
+  }
   function screenTimeCard(m, isBanker){
     const session = activeSessionFor(m.id);
+    const theme = isBanker ? "plain" : kidTheme(m);
     if(session){
       const isOvertime = session.status === "overtime";
-      return `<div class="card" style="text-align:center;${isOvertime ? "border-color:var(--red);background:var(--red-light);" : ""}">
-        <div class="kicker" style="${isOvertime ? "color:var(--red);" : ""}">${isOvertime ? "⏰ Time's up — playing overtime" : "Screen time running"}</div>
-        <div style="font-size:3.2rem;line-height:1.1;font-weight:800;${isOvertime ? "color:var(--red);" : "color:var(--green-dark);"}" data-countdown="${session.ends_at}" data-session-id="${session.id}" data-session-status="${session.status}" data-member-id="${session.member_id}">--:--</div>
+      const total = Math.max(1, Number(session.minutes) || 1) * 60000;
+      const pct = Math.max(0, Math.min(100, (new Date(session.ends_at).getTime() - Date.now()) / total * 100));
+      const sparkle = theme === "anna" ? "✨ Sparkle power" : theme === "ryan" ? "BATTERY" : "Screen time running";
+      return `<div class="card screen-card" style="text-align:center;${isOvertime ? "border-color:var(--red);background:var(--red-light);" : ""}">
+        <div class="kicker" style="${isOvertime ? "color:var(--red);" : ""}">${isOvertime ? "⏰ Time's up — playing overtime" : sparkle}</div>
+        ${batteryHtml(pct, theme, "Screen time battery")}
+        <div style="font-size:3.2rem;line-height:1.1;font-weight:800;${isOvertime ? "color:var(--red);" : "color:var(--green-dark);"}" data-countdown="${session.ends_at}" data-total="${total}" data-session-id="${session.id}" data-session-status="${session.status}" data-member-id="${session.member_id}">--:--</div>
+        <div class="bat-note" hidden>${theme === "anna" ? "🌈 Almost out of sparkle! Find a good stopping place." : theme === "ryan" ? "LOW BATTERY: 5 MIN. SAVE YOUR WORLD." : "5 minutes left — find a stopping place."}</div>
         ${isOvertime ? `<div style="font-size:0.8rem;color:var(--red);margin:2px 0 8px;">Comes out of tomorrow's balance</div>` : ""}
         <button class="pill-btn ${isOvertime ? "" : "outline"} small" data-end-session="${session.id}" style="margin-top:8px;">${isOvertime ? "Stop now" : "Stop early"}</button>
       </div>`;
     }
     if((m.screen_minutes_balance || 0) > 0){
-      return `<div class="card" style="text-align:center;">
-        <div class="kicker">Screen time banked</div>
+      return `<div class="card screen-card" style="text-align:center;">
+        <div class="kicker">${theme === "anna" ? "🔋 Screen time, fully charged" : "Screen time banked"}</div>
+        ${batteryHtml(100, theme, "Screen time battery, full")}
         <div style="font-size:1.6rem;font-weight:800;">${m.screen_minutes_balance} min</div>
         ${isBanker
           ? `<div style="font-size:0.8rem;color:var(--text-dim);">Not started yet</div>`
@@ -1278,6 +1322,20 @@ var SHOP_SPRITE = [
     document.addEventListener(evt, () => { lastActivityAt = Date.now(); }, { passive: true });
   });
 
+  // Drain the battery picture to match the countdown; the "5 minutes left" note shows once, gently.
+  function updateBattery(el, remainingMs){
+    const card = el.closest(".screen-card");
+    const bat = card && card.querySelector(".battery");
+    if(!bat) return;
+    const total = Number(el.dataset.total) || 1;
+    const pct = Math.max(0, Math.min(100, remainingMs / total * 100));
+    const on = Math.ceil(pct / 10);
+    bat.querySelectorAll("i").forEach((seg, i) => seg.classList.toggle("on", i < on));
+    bat.className = "battery " + (pct <= 0 ? "empty" : (remainingMs <= 5 * 60000 || pct <= 20) ? "low" : pct <= 50 ? "mid" : "full");
+    const note = card.querySelector(".bat-note");
+    if(note) note.hidden = !(remainingMs > 0 && remainingMs <= 5 * 60000);
+  }
+
   let countdownInterval = null;
   function startCountdownTicker(){
     clearInterval(countdownInterval);
@@ -1301,6 +1359,7 @@ var SHOP_SPRITE = [
           const mm = Math.floor(overtimeSec / 60);
           const ss = overtimeSec % 60;
           el.textContent = `+${mm}:${String(ss).padStart(2, "0")}`;
+          updateBattery(el, 0);
           if(!el.dataset.overtimeFired){
             el.dataset.overtimeFired = "1";
             if(el.dataset.sessionStatus === "active"){
@@ -1315,6 +1374,7 @@ var SHOP_SPRITE = [
             }
           }
         } else {
+          updateBattery(el, remainingMs);
           const totalSec = Math.ceil(remainingMs / 1000);
           const mm = Math.floor(totalSec / 60);
           const ss = totalSec % 60;
