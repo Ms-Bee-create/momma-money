@@ -186,6 +186,30 @@
   .battery[data-bat-theme="ryan"].mid .bat-body i.on{background:#ffd400}
   body[data-kid="anna"] .bat-note{color:#d6268c}
   body[data-kid="ryan"] .bat-note{font-family:"Courier New",monospace}
+  /* Activity story + statement */
+  .story-sum{background:var(--gold-light);border-radius:14px;padding:10px 14px;margin-bottom:10px;font-weight:700;text-align:center}
+  .story-row{display:flex;align-items:center;gap:10px;background:var(--card,#fff);border-radius:14px;padding:10px 12px;margin-bottom:8px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+  .story-row.pending{opacity:.8;border:2px dashed #ccc}
+  .story-row.rejected{opacity:.6}
+  .story-emoji{font-size:1.8rem;flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(0,0,0,.05)}
+  .story-text{flex:1;font-size:.92rem;line-height:1.35}
+  .story-amt{font-weight:800;color:var(--green-dark);flex:none}.story-amt.cost{color:var(--red)}
+  body[data-kid="anna"] .story-sum{background:#fff3b8;border-radius:20px}
+  body[data-kid="anna"] .story-row{border:0;border-radius:22px;box-shadow:0 6px 16px rgba(214,38,140,.15)}
+  body[data-kid="anna"] .story-row.pending{border:2px dashed #ff9bd0}
+  body[data-kid="anna"] .story-emoji{background:#ffe9f5}
+  body[data-kid="anna"] .story-text{font-size:1rem}
+  .stmt-head{background:#000080;color:#fff;font-family:"Courier New",monospace;font-weight:700;padding:4px 8px;letter-spacing:1px}
+  .stmt-sum{display:flex;gap:6px;margin:6px 0;font-family:"Courier New",monospace;font-size:.72rem}
+  .stmt-sum div{flex:1;background:#fff;padding:6px;box-shadow:inset 1px 1px #808080,inset -1px -1px #fff}
+  .stmt-sum b{display:block;font-size:1rem}
+  .stmt{width:100%;border-collapse:collapse;background:#fff;font-family:"Courier New",monospace;font-size:.78rem;box-shadow:inset 1px 1px #808080,inset -1px -1px #fff}
+  .stmt th{background:#c0c0c0;text-align:left;padding:4px 6px;font-size:.7rem;border-bottom:1px solid #808080}
+  .stmt td{padding:4px 6px;border-bottom:1px dotted #bbb;vertical-align:top}
+  .stmt td.pos{color:#006400}.stmt td.neg{color:#b00020}
+  .stmt tr.pending td,.stmt tr.rejected td{color:#777}
+  .stmt tr.rejected td:nth-child(2){text-decoration:line-through}
+  .stmt-st{font-size:.62rem;background:#ffd400;color:#000;padding:0 3px}.stmt-st.rejected{background:#b00020;color:#fff}
   /* Storefront shop */
   .storefront{border-radius:18px;overflow:hidden;margin-bottom:16px;background:var(--card,#fff);box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center}
   .storefront .awning{height:26px;background:repeating-linear-gradient(90deg,#e0562d 0 28px,#fff 28px 56px);border-bottom:4px solid rgba(0,0,0,.12);border-radius:0 0 14px 14px / 0 0 10px 10px}
@@ -1694,6 +1718,84 @@ var SHOP_SPRITE = [
     for(const [re, e] of CHORE_EMOJI) if(re.test(t)) return e;
     return (chore && CHORE_CAT_EMOJI[chore.category]) || "⭐";
   }
+  // Activity: Anna reads it as a story ("You did the dishes and earned $1!"),
+  // Ryan reads it as a bank statement with a running balance. Same data.
+  function activityKind(t){
+    const d = String(t.description || "");
+    if(t.screen_minutes || /screen time/i.test(d)) return "screen";
+    if(t.type === "earn") return "earn";
+    if(t.type === "fine") return "fine";
+    if(t.type === "spend") return /^(Pet|Accessory):/i.test(d) ? "pet" : "spend";
+    return "adjust";
+  }
+  function dayLabel(iso){
+    const d = new Date(iso), today = new Date(); today.setHours(0,0,0,0);
+    const diff = Math.round((today - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+    if(diff === 0) return "Today";
+    if(diff === 1) return "Yesterday";
+    if(diff < 7) return d.toLocaleDateString([], {weekday:"long"});
+    return d.toLocaleDateString([], {month:"short", day:"numeric"});
+  }
+  function storyLine(t){
+    const d = escapeHtml(t.description || ""), amt = fmt(Math.abs(t.amount));
+    const k = activityKind(t);
+    const pend = t.status === "pending", rej = t.status === "rejected";
+    if(k === "earn"){
+      const e = choreEmoji({title: t.description});
+      return {emoji: e, text: rej ? `You sent <b>${d}</b>. Mom said not this time.` : pend ? `You finished <b>${d}</b>! Mom will check it and you'll get ${amt}.` : `You did <b>${d}</b> and earned <b>${amt}</b>!`};
+    }
+    if(k === "pet"){
+      const n = d.replace(/^(Pet|Accessory):\s*/i, "");
+      return {emoji: "🐾", text: rej ? `Mom said not yet for <b>${n}</b>.` : pend ? `You asked for <b>${n}</b>! Waiting for Mom.` : `You got <b>${n}</b>! Go say hi on your school page.`};
+    }
+    if(k === "screen"){
+      return {emoji: "🔋", text: rej ? `Mom said not this time for ${d}.` : pend ? `You asked for <b>${d}</b>. Waiting for Mom.` : `You bought <b>${d}</b>.`};
+    }
+    if(k === "fine"){
+      return {emoji: "🌧️", text: rej ? `A reminder about <b>${d}</b> was cancelled.` : `A reminder: <b>${d}</b>. That's ${amt} back to the bank. Tomorrow's a fresh start!`};
+    }
+    if(k === "spend"){
+      return {emoji: "🛍️", text: rej ? `Mom said not this time for <b>${d}</b>.` : pend ? `You asked for <b>${d}</b>. Waiting for Mom.` : `You got <b>${d}</b> for ${amt}!`};
+    }
+    return {emoji: "✨", text: `<b>${d}</b> (${t.amount < 0 ? "-" : "+"}${amt})`};
+  }
+  function activityView(m, theme){
+    const mine = state.txns.filter(t => t.member_id === m.id);
+    if(!mine.length) return `<div class="empty-note">${theme === "anna" ? "Your story starts with your first chore! 🌈" : "No transactions yet."}</div>`;
+    const approved = mine.filter(t => t.status === "approved");
+    const weekAgo = Date.now() - 7 * 86400000;
+    const earned = approved.filter(t => t.amount > 0 && new Date(t.created_at).getTime() >= weekAgo).reduce((n, t) => n + Number(t.amount), 0);
+    const spent = approved.filter(t => t.amount < 0 && new Date(t.created_at).getTime() >= weekAgo).reduce((n, t) => n - Number(t.amount), 0);
+    const shown = mine.slice(0, 30);
+    if(theme === "ryan"){
+      // Running balance: walk back from today's balance through approved rows.
+      let bal = Number(m.current_balance) || 0;
+      const rows = shown.map(t => {
+        const after = t.status === "approved" ? bal : null;
+        if(t.status === "approved") bal -= Number(t.amount);
+        return {t, after};
+      });
+      let h = `<div class="stmt-head">ACCOUNT STATEMENT</div>
+        <div class="stmt-sum"><div>IN (7d)<b>+${fmt(earned)}</b></div><div>OUT (7d)<b>-${fmt(spent)}</b></div><div>BALANCE<b>${fmt(m.current_balance)}</b></div></div>
+        <table class="stmt"><thead><tr><th>DATE</th><th>DESCRIPTION</th><th>AMT</th><th>BAL</th></tr></thead><tbody>`;
+      rows.forEach(({t, after}) => {
+        const st = t.status === "approved" ? "" : `<span class="stmt-st ${t.status}">${t.status === "pending" ? "PENDING" : "DENIED"}</span>`;
+        h += `<tr class="${t.status}"><td>${new Date(t.created_at).toLocaleDateString([], {month:"2-digit", day:"2-digit"})}</td><td>${escapeHtml(t.description)} ${st}</td><td class="${t.amount < 0 ? "neg" : "pos"}">${t.amount < 0 ? "-" : "+"}${fmt(Math.abs(t.amount))}</td><td>${after == null ? "--" : fmt(after)}</td></tr>`;
+      });
+      return h + `</tbody></table>`;
+    }
+    let h = theme === "anna" ? `<div class="story-sum">⭐ This week you earned <b>${fmt(earned)}</b>${spent > 0 ? ` and spent <b>${fmt(spent)}</b>` : ""}!</div>` : "";
+    let lastDay = "";
+    shown.forEach(t => {
+      const day = dayLabel(t.created_at);
+      if(day !== lastDay){ h += `<div class="cat-label">${day}</div>`; lastDay = day; }
+      const l = storyLine(t);
+      const cls = t.status === "pending" ? " pending" : t.status === "rejected" ? " rejected" : "";
+      h += `<div class="story-row${cls}"><div class="story-emoji" aria-hidden="true">${l.emoji}</div><div class="story-text">${l.text}</div><div class="story-amt ${t.amount < 0 ? "cost" : ""}">${t.amount < 0 ? "-" : "+"}${fmt(Math.abs(t.amount))}</div></div>`;
+    });
+    return h;
+  }
+
   function dueText(iso){
     if(!iso) return "";
     const today = localISO(new Date());
@@ -1830,18 +1932,7 @@ var SHOP_SPRITE = [
         body += `</div>`;
       });
     } else if(state.kidTab === "activity"){
-      const mine = state.txns.filter(t => t.member_id === m.id).slice(0, 30);
-      if(!mine.length) body = `<div class="empty-note">No activity yet.</div>`;
-      mine.forEach(t => {
-        body += `<div class="item-row">
-          <div><div class="title">${escapeHtml(t.description)}</div>
-          <div class="sub">${new Date(t.created_at).toLocaleDateString()}</div></div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span class="price ${t.amount < 0 ? "cost" : ""}">${t.amount < 0 ? "-" : "+"}${fmt(Math.abs(t.amount))}</span>
-            <span class="status-tag ${t.status}">${t.status}</span>
-          </div>
-        </div>`;
-      });
+      body = activityView(m, kidTheme(m));
     }
 
     const theme = kidTheme(m);
