@@ -342,3 +342,6 @@ alter table public.screen_sessions add constraint screen_sessions_status_check
 -- Quick Fine: which parent gave a fine or award, so the kid's "you were
 -- fined" notice can say "from Dad". Optional — the app works without it.
 alter table public.transactions add column if not exists issued_by uuid references public.members (id) on delete set null;
+
+-- Saving goal (see goals.sql)
+alter table public.members add column if not exists goal_reward_id uuid references public.reward_items (id) on delete set null;
