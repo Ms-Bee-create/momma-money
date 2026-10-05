@@ -210,6 +210,14 @@
   .stmt tr.pending td,.stmt tr.rejected td{color:#777}
   .stmt tr.rejected td:nth-child(2){text-decoration:line-through}
   .stmt-st{font-size:.62rem;background:#ffd400;color:#000;padding:0 3px}.stmt-st.rejected{background:#b00020;color:#fff}
+  /* Avatar + pet on the wallet */
+  .balance-hero{position:relative}
+  .hero-who{position:absolute;top:10px;right:12px;display:flex;align-items:center;gap:6px;z-index:1}
+  .hero-av{width:52px;height:52px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,.9);background:rgba(255,255,255,.3);box-shadow:0 2px 6px rgba(0,0,0,.25)}
+  .hero-av-fb{display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.4rem;color:#fff}
+  .hero-pet{width:64px;height:54px}
+  body[data-kid="ryan"] .hero-av{border-radius:0;border:2px solid #4dff88}
+  body[data-kid="ryan"] .hero-pet{background:#fff;padding:2px;box-shadow:inset 1px 1px #808080,inset -1px -1px #fff}
   /* Storefront shop */
   .storefront{border-radius:18px;overflow:hidden;margin-bottom:16px;background:var(--card,#fff);box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center}
   .storefront .awning{height:26px;background:repeating-linear-gradient(90deg,#e0562d 0 28px,#fff 28px 56px);border-bottom:4px solid rgba(0,0,0,.12);border-radius:0 0 14px 14px / 0 0 10px 10px}
@@ -420,10 +428,13 @@
       supa.from("transactions").select("*").eq("household_id", userId).order("created_at", { ascending: false }).limit(200),
       supa.from("screen_sessions").select("*").eq("household_id", userId).order("created_at", { ascending: false }).limit(50)
     ]);
+    // Forge Academy's kid profiles (avatar choice lives there). Optional: if it can't be read, wallets just skip the avatar.
+    let alKids = [];
+    try{ const r = await supa.from("al_kids").select("id,name,avatar_key").eq("household_id", userId); alKids = r.data || []; }catch(e){}
     return {
       household: household || { screen_time_rate: 5 },
       members: members || [], chores: chores || [], rules: rules || [], logs: logs || [],
-      fines: fines || [], rewards: rewards || [], txns: txns || [], sessions: sessions || []
+      fines: fines || [], rewards: rewards || [], txns: txns || [], sessions: sessions || [], alKids
     };
   }
 
@@ -448,7 +459,7 @@
   async function reload(quiet){
     const data = await fetchAll();
     await applyDueOvertimeCharges(data.members);
-    const sig = JSON.stringify([data.household, data.members, data.txns, data.sessions, data.logs, data.chores, data.fines, data.rewards]);
+    const sig = JSON.stringify([data.household, data.members, data.txns, data.sessions, data.logs, data.chores, data.fines, data.rewards, data.alKids]);
     if(quiet && sig === lastDataSig) return;
     lastDataSig = sig;
     Object.assign(state, data);
@@ -1660,17 +1671,31 @@ var SHOP_SPRITE = [
     const diff = round2((Number(m.current_balance) || 0) - Number(prev));
     return diff > 0 ? diff : 0;
   }
+  // The kid's picked avatar (from Forge Academy) and their pet, shown on the wallet.
+  // Pet = the one most recently bought; before any purchase, the free starter pet.
+  const FORGE_AVATAR_BASE = "https://ms-bee-create.github.io/Homeschool/avatars/";
+  const STARTER_PET = {anna:"uni", ryan:"pc"};
+  function heroWho(m, theme){
+    const k = (state.alKids || []).find(x => String(x.name || "").trim().toLowerCase() === String(m.name || "").trim().toLowerCase());
+    const av = k && k.avatar_key ? `<img class="hero-av" src="${FORGE_AVATAR_BASE}${encodeURIComponent(k.avatar_key)}.webp" alt="" onerror="this.style.display='none'">` : `<div class="hero-av hero-av-fb" aria-hidden="true">${escapeHtml(String(m.name || "?").trim().slice(0, 1).toUpperCase())}</div>`;
+    const bought = state.txns.filter(t => t.member_id === m.id && t.type === "spend" && t.status === "approved" && t.reward_item_id)
+      .map(t => { const r = state.rewards.find(x => x.id === t.reward_item_id); return r && r.grants && r.grants.indexOf("pet:") === 0 ? r.grants.slice(4) : null; })
+      .filter(Boolean)[0];
+    const pet = bought || STARTER_PET[theme];
+    const petHtml = pet ? `<svg class="hero-pet" viewBox="0 0 230 190" aria-hidden="true"><use href="#pet-${pet}"/></svg>` : "";
+    return `<div class="hero-who">${av}${petHtml}</div>`;
+  }
   function walletHero(m, theme){
     const bump = lastSeenBump(m);
     const bumpHtml = bump ? `<div class="bump">+${fmt(bump)} since you last looked!</div>` : "";
     const bankrupt = m.bankrupt ? `<span class="bankrupt-tag">Bankruptcy Protection — do Community Service chores to clear it</span>` : "";
     if(theme === "anna"){
-      return `<div class="balance-hero wallet-anna"><div class="label">My sparkle coins</div><div class="amount">${fmt(m.current_balance)}</div>${bumpHtml}${bankrupt}${coinJarSvg(m.current_balance)}</div>`;
+      return `<div class="balance-hero wallet-anna">${heroWho(m, theme)}<div class="label">My sparkle coins</div><div class="amount">${fmt(m.current_balance)}</div>${bumpHtml}${bankrupt}${coinJarSvg(m.current_balance)}</div>`;
     }
     if(theme === "ryan"){
-      return `<div class="balance-hero wallet-ryan"><div class="label">ACCOUNT BALANCE</div><div class="amount">${fmt(m.current_balance)}</div>${bumpHtml}${bankrupt}${sparkline(m)}</div>`;
+      return `<div class="balance-hero wallet-ryan">${heroWho(m, theme)}<div class="label">ACCOUNT BALANCE</div><div class="amount">${fmt(m.current_balance)}</div>${bumpHtml}${bankrupt}${sparkline(m)}</div>`;
     }
-    return `<div class="balance-hero">
+    return `<div class="balance-hero">${heroWho(m, theme)}
         <div class="label">${escapeHtml(m.name)}'s balance</div>
         <div class="amount">${fmt(m.current_balance)}</div>${bumpHtml}${bankrupt}
       </div>`;
