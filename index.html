@@ -161,6 +161,32 @@
   .tab-btn.active{background:var(--green);border-color:var(--green);color:#fff;}
 
   .cat-label{font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);margin:16px 0 8px;}
+  /* Storefront shop */
+  .storefront{border-radius:18px;overflow:hidden;margin-bottom:16px;background:var(--card,#fff);box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center}
+  .storefront .awning{height:26px;background:repeating-linear-gradient(90deg,#e0562d 0 28px,#fff 28px 56px);border-bottom:4px solid rgba(0,0,0,.12);border-radius:0 0 14px 14px / 0 0 10px 10px}
+  .storefront.closed .awning{filter:grayscale(.75) opacity(.8)}
+  .sf-body{padding:10px 14px 14px}
+  .sf-name{font-weight:800;font-size:1.05rem}
+  .sf-sign{font-weight:800;margin-top:4px;color:var(--green-dark)}
+  .storefront.closed .sf-sign{color:var(--gold-dark)}
+  .sf-when{font-size:1.15rem;font-weight:800;margin-top:2px}
+  .sf-hours{font-size:.74rem;color:var(--text-dim);margin-top:4px}
+  .shop-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px}
+  @media(min-width:560px){.shop-grid{grid-template-columns:repeat(3,1fr)}}
+  .shop-card{background:var(--card,#fff);border-radius:16px;padding:10px;text-align:center;box-shadow:0 3px 8px rgba(0,0,0,.08);display:flex;flex-direction:column;gap:6px}
+  .shop-card.owned{opacity:.75}
+  .shop-pic{height:84px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.04);border-radius:12px}
+  .shop-pet{width:96px;height:80px}
+  .shop-emoji{font-size:2.6rem;line-height:1}
+  .shop-title{font-weight:700;font-size:.85rem;min-height:2.2em;display:flex;align-items:center;justify-content:center}
+  .shop-buy{width:100%}
+  body[data-kid="anna"] .storefront .awning{background:repeating-linear-gradient(90deg,#ff4fa8 0 28px,#fff 28px 56px)}
+  body[data-kid="anna"] .storefront,body[data-kid="anna"] .shop-card{border:0;border-radius:22px;box-shadow:0 6px 16px rgba(214,38,140,.18)}
+  body[data-kid="anna"] .shop-pic{background:#ffe9f5;border-radius:16px}
+  body[data-kid="ryan"] .storefront .awning{background:#000080;height:22px;border:0;border-radius:0}
+  body[data-kid="ryan"] .storefront,body[data-kid="ryan"] .shop-card{border:0;border-radius:0;background:#c0c0c0;box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #fff,inset -2px -2px #808080,inset 2px 2px #dfdfdf}
+  body[data-kid="ryan"] .shop-pic{background:#fff;border-radius:0;box-shadow:inset 1px 1px #808080,inset -1px -1px #fff}
+  body[data-kid="ryan"] .sf-name,body[data-kid="ryan"] .shop-title{font-family:"Courier New",monospace}
   .item-row{
     display:flex;align-items:center;justify-content:space-between;gap:10px;
     background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin-bottom:8px;
@@ -461,6 +487,204 @@
     return hour >= 12 && hour < 17;                             // Sunday 12pm-5pm
   }
   const STORE_HOURS_TEXT = "Weekdays 3–5pm · Saturdays 9am–6pm · Sundays 12pm–5pm";
+var SHOP_SPRITE = [
+'<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>',
+'<symbol id="pet-uni" viewBox="0 0 230 190">',
+'<ellipse cx="39" cy="109" rx="35" ry="13" fill="#B79CFF"/><ellipse cx="35" cy="125" rx="35" ry="13" fill="#7CC4FF"/><ellipse cx="40" cy="140" rx="32" ry="12" fill="#FF7EB6"/>',
+'<g fill="#fff" stroke="#E7DAFF" stroke-width="1.5"><rect x="62" y="126" width="17" height="52" rx="8"/><rect x="88" y="132" width="17" height="52" rx="8"/><rect x="132" y="126" width="17" height="52" rx="8"/><rect x="158" y="132" width="17" height="52" rx="8"/></g>',
+'<g fill="#FFB4D6"><rect x="62" y="166" width="17" height="12" rx="6"/><rect x="88" y="172" width="17" height="12" rx="6"/><rect x="132" y="166" width="17" height="12" rx="6"/><rect x="158" y="172" width="17" height="12" rx="6"/></g>',
+'<ellipse cx="117" cy="111" rx="73" ry="39" fill="#fff" stroke="#E7DAFF" stroke-width="1.5"/><ellipse cx="152" cy="92" rx="28" ry="42" fill="#fff"/>',
+'<ellipse cx="123" cy="49" rx="15" ry="15" fill="#FF6B8B"/><ellipse cx="126" cy="62" rx="15" ry="15" fill="#FFA95C"/><ellipse cx="129" cy="75" rx="15" ry="15" fill="#FFD66B"/><ellipse cx="132" cy="88" rx="15" ry="15" fill="#7DDCA0"/><ellipse cx="135" cy="101" rx="15" ry="15" fill="#7CC4FF"/><ellipse cx="138" cy="114" rx="15" ry="15" fill="#B79CFF"/>',
+'<ellipse cx="178" cy="63" rx="38" ry="33" fill="#fff"/><ellipse cx="209" cy="76" rx="17" ry="16" fill="#fff"/>',
+'<path d="M156 36l8-22 8 22z" fill="#FFB4D6"/><path d="M182 34l10-40 10 40z" fill="#FFD66B"/><path d="M185 22l14-4M184 12l16-3" stroke="#FFB938" stroke-width="2"/>',
+'<ellipse cx="195" cy="55" rx="5.5" ry="7" fill="#3B2A5A"/><circle cx="196.5" cy="52.5" r="2" fill="#fff"/><ellipse cx="186" cy="75" rx="8" ry="5" fill="#FF9FC8" opacity=".75"/><path d="M204 80q5 4 10 0" stroke="#FF7EB6" stroke-width="2.5" fill="none" stroke-linecap="round"/>',
+'</symbol>',
+'<symbol id="pet-cat" viewBox="0 0 230 190">',
+'<path d="M40 120q-40-10-24-50" stroke="#FFB48A" stroke-width="16" fill="none" stroke-linecap="round"/>',
+'<ellipse cx="105" cy="130" rx="70" ry="42" fill="#FFC9A3"/><rect x="62" y="150" width="20" height="34" rx="10" fill="#FFC9A3"/><rect x="128" y="150" width="20" height="34" rx="10" fill="#FFC9A3"/><ellipse cx="72" cy="112" rx="26" ry="20" fill="#FFB48A" opacity=".5"/>',
+'<circle cx="165" cy="80" r="46" fill="#FFC9A3"/><path d="M128 52l6-34 28 22zM202 52l-6-34-28 22z" fill="#FFC9A3"/><path d="M137 40l3-14 12 10zM193 40l-3-14-12 10z" fill="#FFB4D6"/>',
+'<ellipse cx="148" cy="78" rx="6" ry="8" fill="#3B2A5A"/><ellipse cx="182" cy="78" rx="6" ry="8" fill="#3B2A5A"/><circle cx="150" cy="75" r="2.3" fill="#fff"/><circle cx="184" cy="75" r="2.3" fill="#fff"/>',
+'<path d="M160 92l5 5 5-5z" fill="#FF7EB6"/><path d="M165 97q-6 8-12 4M165 97q6 8 12 4" stroke="#B5655A" stroke-width="2" fill="none" stroke-linecap="round"/><ellipse cx="136" cy="94" rx="9" ry="5" fill="#FF9FC8" opacity=".7"/><ellipse cx="194" cy="94" rx="9" ry="5" fill="#FF9FC8" opacity=".7"/>',
+'</symbol>',
+/* Byte: a beige CRT computer on stubby legs, pixel face on the screen */
+'<symbol id="pet-pc" viewBox="0 0 230 190">',
+'<rect x="40" y="76" width="28" height="10" fill="#B8B09A"/><rect x="162" y="76" width="28" height="10" fill="#B8B09A"/>',
+'<rect x="66" y="132" width="20" height="42" fill="#8E8878"/><rect x="144" y="132" width="20" height="42" fill="#8E8878"/>',
+'<rect x="56" y="172" width="38" height="12" fill="#4A5566"/><rect x="136" y="172" width="38" height="12" fill="#4A5566"/>',
+'<rect x="56" y="14" width="118" height="104" fill="#D8D0B8" stroke="#8E8878" stroke-width="3"/>',
+'<rect x="70" y="28" width="90" height="66" fill="#0B2A2A" stroke="#6F6A5A" stroke-width="3"/>',
+'<rect x="88" y="46" width="12" height="16" fill="#7CFFB5"/><rect x="130" y="46" width="12" height="16" fill="#7CFFB5"/>',
+'<path d="M92 72v6h46v-6" stroke="#7CFFB5" stroke-width="5" fill="none" stroke-linecap="square"/>',
+'<rect x="70" y="104" width="46" height="5" fill="#8E8878"/><rect x="140" y="102" width="12" height="9" fill="#3DE0C0"/><rect x="156" y="102" width="6" height="9" fill="#B8B09A"/>',
+'<rect x="84" y="118" width="62" height="14" fill="#C4BCA4" stroke="#8E8878" stroke-width="2"/>',
+'</symbol>',
+/* Disk: a 3.5-inch floppy with a face on its label */
+'<symbol id="pet-disk" viewBox="0 0 230 190">',
+'<rect x="64" y="126" width="14" height="44" fill="#8E8878"/><rect x="152" y="126" width="14" height="44" fill="#8E8878"/>',
+'<rect x="56" y="168" width="30" height="12" fill="#4A5566"/><rect x="144" y="168" width="30" height="12" fill="#4A5566"/>',
+'<rect x="44" y="76" width="22" height="10" fill="#1F3F94"/><rect x="164" y="76" width="22" height="10" fill="#1F3F94"/>',
+'<path d="M60 14h96l16 16v100H60z" fill="#2A5FD0" stroke="#1F3F94" stroke-width="3"/>',
+'<rect x="88" y="14" width="56" height="38" fill="#C9CED6" stroke="#8D95A3" stroke-width="2"/><rect x="124" y="20" width="12" height="26" fill="#5E6A7A"/>',
+'<rect x="76" y="70" width="80" height="54" fill="#F4F0E0"/><path d="M82 82h68M82 90h68" stroke="#C9C2A8" stroke-width="2"/>',
+'<rect x="98" y="98" width="8" height="10" fill="#222"/><rect x="126" y="98" width="8" height="10" fill="#222"/><path d="M102 114v4h28v-4" stroke="#222" stroke-width="3" fill="none"/>',
+'</symbol>',
+'<linearGradient id="rbwg" gradientUnits="userSpaceOnUse" x1="82" y1="0" x2="148" y2="0"><stop offset="0" stop-color="#FF6B8B"/><stop offset=".2" stop-color="#FFA95C"/><stop offset=".4" stop-color="#FFD66B"/><stop offset=".6" stop-color="#7DDCA0"/><stop offset=".8" stop-color="#7CC4FF"/><stop offset="1" stop-color="#B79CFF"/></linearGradient>',
+'<radialGradient id="orbg" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#9FE6FF"/><stop offset=".6" stop-color="#2D9BE8"/><stop offset="1" stop-color="#0A5FB5"/></radialGradient>',
+/* Rainbow Girl: a little blonde girl with blue eyes and rainbow glasses */
+'<symbol id="pet-girl" viewBox="0 0 230 190">',
+'<rect x="96" y="138" width="13" height="40" rx="6" fill="#FFE0C8"/><rect x="121" y="138" width="13" height="40" rx="6" fill="#FFE0C8"/>',
+'<ellipse cx="102" cy="180" rx="15" ry="7" fill="#FF7EB6"/><ellipse cx="128" cy="180" rx="15" ry="7" fill="#FF7EB6"/>',
+'<rect x="58" y="100" width="26" height="11" rx="5" fill="#FFE0C8" transform="rotate(-20 70 105)"/><rect x="146" y="100" width="26" height="11" rx="5" fill="#FFE0C8" transform="rotate(20 160 105)"/>',
+'<path d="M84 96h62l22 50H62z" fill="#FF9FD0"/><rect x="62" y="146" width="106" height="6" fill="#FFD66B"/><rect x="62" y="152" width="106" height="5" fill="#7DDCA0"/><rect x="62" y="157" width="106" height="5" fill="#7CC4FF"/>',
+'<circle cx="60" cy="72" r="18" fill="#F7D774"/><circle cx="170" cy="72" r="18" fill="#F7D774"/><circle cx="74" cy="60" r="6" fill="#FF7EB6"/><circle cx="156" cy="60" r="6" fill="#FF7EB6"/>',
+'<ellipse cx="115" cy="56" rx="50" ry="48" fill="#F7D774"/><circle cx="115" cy="62" r="38" fill="#FFE0C8"/>',
+'<path d="M77 54Q82 18 115 16Q148 18 153 54Q136 38 115 44Q94 38 77 54Z" fill="#F7D774"/>',
+'<circle cx="98" cy="64" r="5.5" fill="#4FA3E8"/><circle cx="132" cy="64" r="5.5" fill="#4FA3E8"/><circle cx="99.5" cy="62" r="2" fill="#fff"/><circle cx="133.5" cy="62" r="2" fill="#fff"/>',
+'<circle cx="98" cy="64" r="14" fill="#fff" fill-opacity=".25" stroke="url(#rbwg)" stroke-width="4.5"/><circle cx="132" cy="64" r="14" fill="#fff" fill-opacity=".25" stroke="url(#rbwg)" stroke-width="4.5"/><path d="M112 62q3-4 6 0" stroke="url(#rbwg)" stroke-width="4" fill="none"/>',
+'<ellipse cx="88" cy="82" rx="7" ry="4" fill="#FF9FC8" opacity=".7"/><ellipse cx="142" cy="82" rx="7" ry="4" fill="#FF9FC8" opacity=".7"/><path d="M106 84q9 8 18 0" stroke="#E0556F" stroke-width="3" fill="none" stroke-linecap="round"/>',
+'</symbol>',
+/* Rainbow Dragon */
+'<symbol id="pet-dragon" viewBox="0 0 230 190">',
+'<path d="M44 128q-34 8-30 40q10-18 38-12z" fill="#7DDCC0"/><path d="M36 150l-16 4 10-14z" fill="#FFD66B"/>',
+'<path d="M96 96q-28-50 6-62q6 36 22 58z" fill="#FFB4D6"/><path d="M84 98q-34-34-8-60q2 30 16 56z" fill="#FF9FD0"/>',
+'<rect x="70" y="140" width="20" height="38" rx="9" fill="#7DDCC0"/><rect x="138" y="140" width="20" height="38" rx="9" fill="#7DDCC0"/><rect x="92" y="146" width="20" height="32" rx="9" fill="#6BCDB2"/><rect x="160" y="146" width="20" height="32" rx="9" fill="#6BCDB2"/>',
+'<ellipse cx="116" cy="124" rx="66" ry="42" fill="#7DDCC0"/><ellipse cx="124" cy="136" rx="40" ry="28" fill="#FFF1C9"/>',
+'<path d="M64 88l8-18 8 18z" fill="#FF6B8B"/><path d="M82 82l8-18 8 18z" fill="#FFA95C"/><path d="M100 80l8-18 8 18z" fill="#FFD66B"/><path d="M118 80l8-18 8 18z" fill="#7DDCA0"/><path d="M136 84l8-18 8 18z" fill="#7CC4FF"/>',
+'<circle cx="168" cy="84" r="36" fill="#7DDCC0"/><ellipse cx="196" cy="94" rx="20" ry="15" fill="#8FE6CF"/>',
+'<path d="M156 58l-4-24 18 14z" fill="#FFD66B"/><path d="M178 56l8-24 8 22z" fill="#FFD66B"/>',
+'<circle cx="172" cy="76" r="6" fill="#3B2A5A"/><circle cx="174" cy="74" r="2" fill="#fff"/><ellipse cx="160" cy="94" rx="8" ry="5" fill="#FF9FC8" opacity=".7"/><circle cx="198" cy="90" r="2.5" fill="#3B2A5A"/><path d="M190 102q8 5 16 0" stroke="#3B2A5A" stroke-width="2.5" fill="none" stroke-linecap="round"/>',
+'</symbol>',
+/* Fluffy Bunny */
+'<symbol id="pet-bunny" viewBox="0 0 230 190">',
+'<circle cx="50" cy="146" r="16" fill="#fff" stroke="#EADCF5" stroke-width="2"/>',
+'<ellipse cx="108" cy="140" rx="66" ry="42" fill="#fff" stroke="#EADCF5" stroke-width="2"/>',
+'<ellipse cx="88" cy="176" rx="18" ry="9" fill="#fff" stroke="#EADCF5" stroke-width="2"/><ellipse cx="140" cy="176" rx="18" ry="9" fill="#fff" stroke="#EADCF5" stroke-width="2"/>',
+'<ellipse cx="140" cy="38" rx="14" ry="42" fill="#fff" stroke="#EADCF5" stroke-width="2"/><ellipse cx="140" cy="40" rx="7" ry="30" fill="#FFB4D6"/>',
+'<ellipse cx="182" cy="38" rx="14" ry="42" fill="#fff" stroke="#EADCF5" stroke-width="2" transform="rotate(10 182 60)"/><ellipse cx="183" cy="40" rx="7" ry="30" fill="#FFB4D6" transform="rotate(10 182 60)"/>',
+'<circle cx="160" cy="100" r="44" fill="#fff" stroke="#EADCF5" stroke-width="2"/>',
+'<ellipse cx="144" cy="94" rx="5.5" ry="7.5" fill="#3B2A5A"/><ellipse cx="176" cy="94" rx="5.5" ry="7.5" fill="#3B2A5A"/><circle cx="146" cy="91" r="2" fill="#fff"/><circle cx="178" cy="91" r="2" fill="#fff"/>',
+'<path d="M154 108l6 5 6-5z" fill="#FF7EB6"/><path d="M160 113q-6 8-13 3M160 113q6 8 13 3" stroke="#B5655A" stroke-width="2" fill="none" stroke-linecap="round"/><ellipse cx="136" cy="110" rx="9" ry="5" fill="#FF9FC8" opacity=".7"/><ellipse cx="184" cy="110" rx="9" ry="5" fill="#FF9FC8" opacity=".7"/>',
+'</symbol>',
+/* Waddles the Penguin */
+'<symbol id="pet-penguin" viewBox="0 0 230 190">',
+'<ellipse cx="96" cy="180" rx="22" ry="8" fill="#FFA033"/><ellipse cx="136" cy="180" rx="22" ry="8" fill="#FFA033"/>',
+'<ellipse cx="46" cy="110" rx="14" ry="38" fill="#2E3A59" transform="rotate(16 46 110)"/><ellipse cx="184" cy="110" rx="14" ry="38" fill="#2E3A59" transform="rotate(-16 184 110)"/>',
+'<ellipse cx="115" cy="104" rx="60" ry="74" fill="#2E3A59"/><ellipse cx="115" cy="118" rx="40" ry="56" fill="#fff"/>',
+'<circle cx="96" cy="62" r="11" fill="#fff"/><circle cx="134" cy="62" r="11" fill="#fff"/><circle cx="98" cy="63" r="5.5" fill="#222"/><circle cx="132" cy="63" r="5.5" fill="#222"/><circle cx="100" cy="61" r="2" fill="#fff"/><circle cx="134" cy="61" r="2" fill="#fff"/>',
+'<path d="M104 76h22l-11 16z" fill="#FFA033"/><ellipse cx="82" cy="80" rx="8" ry="5" fill="#FF9FC8" opacity=".8"/><ellipse cx="148" cy="80" rx="8" ry="5" fill="#FF9FC8" opacity=".8"/>',
+'</symbol>',
+/* Bolt the robot and Roomie the Roomba */
+'<symbol id="pet-bot" viewBox="0 0 230 190">',
+'<line x1="115" y1="14" x2="115" y2="38" stroke="#8FB3C9" stroke-width="5"/><circle cx="115" cy="12" r="9" fill="#FFB938"/>',
+'<rect x="62" y="36" width="106" height="74" rx="22" fill="#CFE6F5"/><rect x="74" y="50" width="82" height="44" rx="14" fill="#0F2A3A"/>',
+'<circle cx="98" cy="72" r="9" fill="#3DE0C0"/><circle cx="132" cy="72" r="9" fill="#3DE0C0"/><circle cx="101" cy="69" r="3" fill="#fff"/><circle cx="135" cy="69" r="3" fill="#fff"/>',
+'<path d="M104 86q11 7 22 0" stroke="#3DE0C0" stroke-width="3" fill="none" stroke-linecap="round"/>',
+'<rect x="76" y="114" width="78" height="46" rx="14" fill="#9FC4DC"/><rect x="100" y="126" width="30" height="8" rx="4" fill="#3DE0C0"/><circle cx="108" cy="146" r="4" fill="#FF7EB6"/><circle cx="122" cy="146" r="4" fill="#FFB938"/>',
+'<rect x="44" y="118" width="26" height="12" rx="6" fill="#9FC4DC"/><rect x="160" y="118" width="26" height="12" rx="6" fill="#9FC4DC"/>',
+'<rect x="78" y="160" width="26" height="24" rx="10" fill="#5E7F94"/><rect x="126" y="160" width="26" height="24" rx="10" fill="#5E7F94"/>',
+'</symbol>',
+'<symbol id="pet-roomba" viewBox="0 0 230 190">',
+'<ellipse cx="115" cy="170" rx="86" ry="10" fill="#000" opacity=".18"/>',
+'<ellipse cx="115" cy="140" rx="92" ry="38" fill="#3A4A58"/><ellipse cx="115" cy="128" rx="92" ry="38" fill="#CFE6F5"/>',
+'<ellipse cx="115" cy="128" rx="68" ry="26" fill="#9FC4DC"/><circle cx="115" cy="124" r="15" fill="#18303F"/><circle cx="115" cy="124" r="6" fill="#3DE0C0"/>',
+'<rect x="168" y="106" width="22" height="9" rx="4.5" fill="#FFB938" transform="rotate(18 179 110)"/>',
+'<circle cx="170" cy="150" r="7" fill="#FF7EB6"/><path d="M52 112q-10 10-4 24" stroke="#3A4A58" stroke-width="6" fill="none" stroke-linecap="round"/>',
+'<path d="M96 100l-6-12M134 100l6-12" stroke="#8FB3C9" stroke-width="4" stroke-linecap="round"/>',
+'</symbol>',
+/* Flaggy pals: simplified four-pane window mascots, one per era (original drawings, not the real logos) */
+'<symbol id="pet-flag95" viewBox="0 0 230 190">',
+'<rect x="84" y="142" width="14" height="36" fill="#6E6E6E"/><rect x="134" y="142" width="14" height="36" fill="#6E6E6E"/><rect x="76" y="176" width="30" height="9" fill="#222"/><rect x="126" y="176" width="30" height="9" fill="#222"/>',
+'<path d="M52 30Q82 20 112 32V84Q82 72 52 84Z" fill="#F35325" stroke="#222" stroke-width="3"/><path d="M120 32Q150 44 180 34V86Q150 96 120 84Z" fill="#81BC06" stroke="#222" stroke-width="3"/>',
+'<path d="M52 92Q82 80 112 92V144Q82 132 52 144Z" fill="#05A6F0" stroke="#222" stroke-width="3"/><path d="M120 92Q150 104 180 94V146Q150 156 120 144Z" fill="#FFBA08" stroke="#222" stroke-width="3"/>',
+'<circle cx="92" cy="66" r="7" fill="#fff" stroke="#222" stroke-width="2"/><circle cx="142" cy="70" r="7" fill="#fff" stroke="#222" stroke-width="2"/><circle cx="93" cy="67" r="3" fill="#222"/><circle cx="143" cy="71" r="3" fill="#222"/>',
+'<path d="M96 112Q117 128 140 114" stroke="#222" stroke-width="3.5" fill="none" stroke-linecap="round"/>',
+'</symbol>',
+'<symbol id="pet-flag98" viewBox="0 0 230 190">',
+'<rect x="84" y="142" width="14" height="36" fill="#6E6E6E"/><rect x="134" y="142" width="14" height="36" fill="#6E6E6E"/><rect x="76" y="176" width="30" height="9" fill="#222"/><rect x="126" y="176" width="30" height="9" fill="#222"/>',
+'<path d="M52 30Q82 20 112 32V84Q82 72 52 84Z" fill="#F35325"/><path d="M120 32Q150 44 180 34V86Q150 96 120 84Z" fill="#81BC06"/>',
+'<path d="M52 92Q82 80 112 92V144Q82 132 52 144Z" fill="#05A6F0"/><path d="M120 92Q150 104 180 94V146Q150 156 120 144Z" fill="#FFBA08"/>',
+'<rect x="88" y="8" width="56" height="20" fill="#C0C0C0" stroke="#222" stroke-width="2"/><text x="116" y="23" text-anchor="middle" font-family="monospace" font-size="15" font-weight="700" fill="#000080">98</text>',
+'<circle cx="92" cy="66" r="7" fill="#fff"/><circle cx="142" cy="70" r="7" fill="#fff"/><circle cx="93" cy="67" r="3" fill="#222"/><circle cx="143" cy="71" r="3" fill="#222"/>',
+'<path d="M96 112Q117 128 140 114" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round"/>',
+'</symbol>',
+'<symbol id="pet-flagxp" viewBox="0 0 230 190">',
+'<rect x="84" y="142" width="14" height="36" fill="#4A8F3C"/><rect x="134" y="142" width="14" height="36" fill="#4A8F3C"/><rect x="76" y="176" width="30" height="9" rx="4" fill="#245B1B"/><rect x="126" y="176" width="30" height="9" rx="4" fill="#245B1B"/>',
+'<path d="M50 38Q82 16 114 34V86Q82 68 50 90Z" fill="#F25022"/><path d="M120 36Q152 54 184 30V82Q152 106 120 88Z" fill="#7FBA00"/>',
+'<path d="M50 96Q82 74 114 92V144Q82 126 50 148Z" fill="#00A4EF"/><path d="M120 94Q152 112 184 88V140Q152 164 120 146Z" fill="#FFB900"/>',
+'<ellipse cx="82" cy="46" rx="26" ry="9" fill="#fff" opacity=".35"/><ellipse cx="152" cy="44" rx="26" ry="9" fill="#fff" opacity=".35"/>',
+'<circle cx="92" cy="68" r="7" fill="#fff"/><circle cx="144" cy="70" r="7" fill="#fff"/><circle cx="93" cy="69" r="3" fill="#222"/><circle cx="145" cy="71" r="3" fill="#222"/>',
+'<path d="M96 114Q118 130 142 114" stroke="#fff" stroke-width="3.5" fill="none" stroke-linecap="round"/>',
+'</symbol>',
+'<symbol id="pet-orb" viewBox="0 0 230 190">',
+'<rect x="92" y="148" width="14" height="30" rx="6" fill="#0A5FB5"/><rect x="126" y="148" width="14" height="30" rx="6" fill="#0A5FB5"/><ellipse cx="99" cy="180" rx="15" ry="6" fill="#06407A"/><ellipse cx="133" cy="180" rx="15" ry="6" fill="#06407A"/>',
+'<circle cx="116" cy="92" r="62" fill="url(#orbg)" stroke="#E6F5FF" stroke-width="4"/><ellipse cx="96" cy="52" rx="30" ry="14" fill="#fff" opacity=".35"/>',
+'<g opacity=".92"><path d="M90 66Q104 60 114 66V84Q104 78 90 84Z" fill="#fff"/><path d="M118 66Q130 72 142 66V84Q130 90 118 84Z" fill="#fff"/><path d="M90 88Q104 82 114 88V106Q104 100 90 106Z" fill="#fff"/><path d="M118 88Q130 94 142 88V106Q130 112 118 106Z" fill="#fff"/></g>',
+'<circle cx="100" cy="126" r="5" fill="#fff"/><circle cx="132" cy="126" r="5" fill="#fff"/><circle cx="101" cy="127" r="2.4" fill="#06407A"/><circle cx="133" cy="127" r="2.4" fill="#06407A"/><path d="M106 138Q116 146 126 138" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>',
+'</symbol>',
+'<symbol id="pet-pane10" viewBox="0 0 230 190">',
+'<rect x="84" y="142" width="14" height="36" fill="#005A9E"/><rect x="134" y="142" width="14" height="36" fill="#005A9E"/><rect x="76" y="176" width="30" height="9" fill="#003A66"/><rect x="126" y="176" width="30" height="9" fill="#003A66"/>',
+'<rect x="54" y="28" width="58" height="56" fill="#00ADEF"/><rect x="120" y="28" width="58" height="56" fill="#0A8FE0"/><rect x="54" y="92" width="58" height="52" fill="#0A8FE0"/><rect x="120" y="92" width="58" height="52" fill="#0078D7"/>',
+'<rect x="82" y="56" width="14" height="14" fill="#fff"/><rect x="136" y="56" width="14" height="14" fill="#fff"/><rect x="87" y="61" width="6" height="6" fill="#003A66"/><rect x="141" y="61" width="6" height="6" fill="#003A66"/>',
+'<path d="M92 112v6h48v-6" stroke="#fff" stroke-width="5" fill="none"/>',
+'</symbol>',
+'<symbol id="pet-pane11" viewBox="0 0 230 190">',
+'<rect x="86" y="142" width="14" height="36" rx="7" fill="#2B6CC4"/><rect x="132" y="142" width="14" height="36" rx="7" fill="#2B6CC4"/><rect x="76" y="174" width="32" height="11" rx="5" fill="#1B4A94"/><rect x="124" y="174" width="32" height="11" rx="5" fill="#1B4A94"/>',
+'<rect x="54" y="28" width="58" height="56" rx="10" fill="#4CC2FF"/><rect x="120" y="28" width="58" height="56" rx="10" fill="#2FA8F5"/><rect x="54" y="92" width="58" height="52" rx="10" fill="#2FA8F5"/><rect x="120" y="92" width="58" height="52" rx="10" fill="#0F7FE0"/>',
+'<circle cx="89" cy="62" r="8" fill="#fff"/><circle cx="143" cy="62" r="8" fill="#fff"/><circle cx="90" cy="63" r="3.6" fill="#16365E"/><circle cx="144" cy="63" r="3.6" fill="#16365E"/>',
+'<path d="M96 114Q116 128 138 114" stroke="#fff" stroke-width="4.5" fill="none" stroke-linecap="round"/>',
+'</symbol>',
+/* Orbit: a floating yellow orb robot with glowing blue eyes and the Forge badge */
+'<radialGradient id="orbitg" cx=".35" cy=".28" r=".85"><stop offset="0" stop-color="#FFF08A"/><stop offset=".55" stop-color="#FFC81A"/><stop offset="1" stop-color="#D99A00"/></radialGradient>',
+'<symbol id="pet-orbit" viewBox="0 0 230 190">',
+'<ellipse cx="115" cy="183" rx="42" ry="5" fill="#000" opacity=".18"/><ellipse cx="115" cy="168" rx="38" ry="7" fill="#FFD21F" opacity=".55"/>',
+'<ellipse cx="46" cy="92" rx="12" ry="24" fill="#2A2F3F" stroke="#5CC8FF" stroke-width="3"/><ellipse cx="184" cy="92" rx="12" ry="24" fill="#2A2F3F" stroke="#5CC8FF" stroke-width="3"/>',
+'<circle cx="115" cy="88" r="70" fill="url(#orbitg)" stroke="#B88400" stroke-width="2"/>',
+'<rect x="98" y="20" width="34" height="7" rx="3.5" fill="#B88400"/>',
+'<rect x="50" y="50" width="130" height="62" rx="31" fill="#0E1220" stroke="#2B3350" stroke-width="3"/>',
+'<path d="M76 90a17 17 0 0 1 34 0M120 90a17 17 0 0 1 34 0" fill="none" stroke="#5CC8FF" stroke-width="14" stroke-linecap="round" opacity=".28"/><path d="M76 90a17 17 0 0 1 34 0M120 90a17 17 0 0 1 34 0" fill="none" stroke="#B8EDFF" stroke-width="7" stroke-linecap="round"/>',
+'<circle cx="115" cy="140" r="22" fill="#12141C" stroke="#E8C020" stroke-width="3"/><path d="M115 120q-9 11 0 19q9-8 0-19z" fill="#FF8A1F"/><rect x="104" y="141" width="22" height="6" rx="1.5" fill="#B8BCC6"/><rect x="109" y="147" width="12" height="4" fill="#8A8E99"/>',
+'</symbol>',
+/* accessories, drawn around (0,0): head ones sit above it, shades are centered on it */
+'<g id="acc-partyhat"><path d="M-20 0L0 -48L20 0Z" fill="#FF7EB6"/><path d="M-12 -18L12 -18M-16 -8L16 -8" stroke="#fff" stroke-width="4"/><circle cx="0" cy="-50" r="6" fill="#FFD66B"/></g>',
+'<g id="acc-bow"><path d="M0 -4L-26 -18V10Z" fill="#FF4D9A"/><path d="M0 -4L26 -18V10Z" fill="#FF4D9A"/><circle cx="0" cy="-4" r="7" fill="#FF86BD"/></g>',
+'<g id="acc-crown"><path d="M-26 0V-28L-13 -13L0 -34L13 -13L26 -28V0Z" fill="#FFD34D" stroke="#E0A800" stroke-width="2"/><circle cx="-13" cy="-8" r="3.5" fill="#FF6B8B"/><circle cx="0" cy="-8" r="3.5" fill="#7CC4FF"/><circle cx="13" cy="-8" r="3.5" fill="#7DDCA0"/></g>',
+'<g id="acc-shades"><rect x="-32" y="-9" width="27" height="17" rx="7" fill="#222"/><rect x="5" y="-9" width="27" height="17" rx="7" fill="#222"/><rect x="-6" y="-5" width="12" height="4" fill="#222"/><path d="M-26 -5l8 0M11 -5l8 0" stroke="#fff" stroke-width="2" opacity=".6"/></g>',
+'</defs></svg>'
+].join("");
+  (function(){ if(document.getElementById("shopSpriteHost")) return; const d = document.createElement("div"); d.id = "shopSpriteHost"; d.innerHTML = SHOP_SPRITE; document.body.appendChild(d); })();
+  const ACC_EMOJI = {partyhat:"🎉", bow:"🎀", crown:"👑", shades:"😎"};
+  const SHOP_CAT_EMOJI = {"Screen & Media":"📺", "Food & Treats":"🍦", "Privileges & Fun":"🎈", "Tangible Rewards":"🎁", "Pets & Accessories":"🐾"};
+  const SHOP_WORDS = [[/ice cream|dessert|cookie|candy|treat|snack|pizza|soda/i,"🍦"],[/movie|show|tv|youtube/i,"🎬"],[/game|minecraft|roblox/i,"🎮"],[/stay up|bed ?time|late/i,"🌙"],[/toy|lego|book|craft/i,"🧸"],[/park|zoo|outing|trip|swim/i,"🌳"],[/friend|sleepover|playdate/i,"👯"],[/money|cash|\$/i,"💵"]];
+  function shopEmoji(r){
+    const g = r.grants || "";
+    if(g.indexOf("acc:") === 0) return ACC_EMOJI[g.slice(4)] || "✨";
+    for(const w of SHOP_WORDS) if(w[0].test(r.title)) return w[1];
+    return SHOP_CAT_EMOJI[r.category] || "🎁";
+  }
+  function shopPicture(r){
+    const g = r.grants || "";
+    if(g.indexOf("pet:") === 0) return `<svg class="shop-pet" viewBox="0 0 230 190" aria-hidden="true"><use href="#pet-${g.slice(4)}"/></svg>`;
+    return `<div class="shop-emoji" aria-hidden="true">${shopEmoji(r)}</div>`;
+  }
+  // "Opens in 2 hours" / "Closes in 40 minutes" so a closed store is a plan, not a dead end.
+  function storeStatus(){
+    const now = new Date();
+    const win = d => { const day = d.getDay(); return day >= 1 && day <= 5 ? [15,17] : day === 6 ? [9,18] : [12,17]; };
+    const at = (d, h) => { const x = new Date(d); x.setHours(Math.floor(h), Math.round((h % 1) * 60), 0, 0); return x; };
+    const mins = ms => Math.max(1, Math.round(ms / 60000));
+    const span = m => { if(m < 60) return m + (m === 1 ? " minute" : " minutes"); const h = Math.round(m / 60); return (m < 90 ? "about " : "about ") + h + (h === 1 ? " hour" : " hours"); };
+    if(isStoreOpen()){ const w = win(now); return {open:true, text:"Closes in " + span(mins(at(now, w[1]) - now))}; }
+    for(let i = 0; i < 8; i++){
+      const d = new Date(now); d.setDate(d.getDate() + i);
+      const w = win(d), start = at(d, w[0]);
+      if(start > now){
+        const clock = start.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}).replace(":00", "").toLowerCase();
+        const text = i === 0 ? "Opens in " + span(mins(start - now)) : i === 1 ? "Opens tomorrow at " + clock : "Opens " + start.toLocaleDateString([], {weekday:"long"}) + " at " + clock;
+        return {open:false, text};
+      }
+    }
+    return {open:false, text:"Closed right now"};
+  }
 
   // A short, unmissable tone at zero — not just a color change on a card
   // that might be off-screen. Built with Web Audio instead of an audio file
@@ -1500,9 +1724,16 @@
         : pendingScreen ? "Request already waiting"
         : spendable < screenTimeCost(state.stMinutes) ? "Not enough yet"
         : `Request for <span id="stCost">${fmt(screenTimeCost(state.stMinutes))}</span>`;
-      body += `<div class="card" style="text-align:center;margin-bottom:16px;${storeOpen ? "" : "background:var(--gold-light);"}">
-        <div style="font-weight:800;${storeOpen ? "color:var(--green-dark);" : "color:var(--gold-dark);"}">${storeOpen ? "🟢 Store's open" : "🔒 Store's closed"}</div>
-        <div style="font-size:0.78rem;color:var(--text-dim);margin-top:4px;">${STORE_HOURS_TEXT}</div>
+      const ss = storeStatus();
+      const shopTheme = kidTheme(m);
+      body += `<div class="storefront ${ss.open ? "open" : "closed"}">
+        <div class="awning" aria-hidden="true"></div>
+        <div class="sf-body">
+          <div class="sf-name">${shopTheme === "ryan" ? "SHOP.EXE" : shopTheme === "anna" ? "🛍️ " + escapeHtml(m.name) + "'s Shop" : "🛍️ The Shop"}</div>
+          <div class="sf-sign">${ss.open ? "🟢 We're open!" : "🌙 Closed for now"}</div>
+          <div class="sf-when">${ss.text}</div>
+          <div class="sf-hours">${STORE_HOURS_TEXT}</div>
+        </div>
       </div>`;
       body += `<div class="cat-label">Buy Screen Time</div>
         <div class="card" style="margin-bottom:16px;">
@@ -1519,22 +1750,24 @@
         </div>`;
       const byCat = {};
       state.rewards.forEach(r => { (byCat[r.category] = byCat[r.category] || []).push(r); });
-      Object.keys(byCat).forEach(cat => {
-        body += `<div class="cat-label">${escapeHtml(cat)}</div>`;
+      const catOrder = Object.keys(byCat).sort((x, y) => (x === "Pets & Accessories" ? -1 : 0) - (y === "Pets & Accessories" ? -1 : 0));
+      catOrder.forEach(cat => {
+        body += `<div class="cat-label">${escapeHtml(cat)}</div><div class="shop-grid">`;
         byCat[cat].forEach(r => {
           const afford = spendable >= Number(r.cost) && !m.bankrupt;
           // Pets/accessories are one-per-kid: once bought (or requested) the button says so instead of letting a second one through.
           const mineFor = st => r.grants && state.txns.some(t => t.member_id === m.id && t.reward_item_id === r.id && t.type === "spend" && t.status === st);
           const ownedItem = mineFor("approved"), waitingItem = !ownedItem && mineFor("pending");
           const btnLabel = ownedItem ? "Owned ✓" : waitingItem ? "Waiting…" : fmt(r.cost);
-          body += `<div class="item-row">
-            <div class="title">${escapeHtml(r.title)}</div>
-            <span style="display:flex;gap:6px;align-items:center;">
-              ${(ownedItem || waitingItem) ? "" : `<button class="pill-btn outline small goal-star${m.goal_reward_id === r.id ? " on" : ""}" type="button" data-goal="${r.id}" title="Save for this">${m.goal_reward_id === r.id ? "⭐ Goal" : "☆ Save"}</button>`}
-              <button class="pill-btn gold" data-spend="${r.id}" ${(afford && storeOpen && !ownedItem && !waitingItem) ? "" : "disabled"}>${btnLabel}</button>
-            </span>
+          const shortTitle = String(r.title).replace(/^(Pet|Accessory):\s*/, "");
+          body += `<div class="shop-card${ownedItem ? " owned" : ""}">
+            <div class="shop-pic">${shopPicture(r)}</div>
+            <div class="shop-title">${escapeHtml(shortTitle)}</div>
+            <button class="pill-btn gold shop-buy" data-spend="${r.id}" ${(afford && storeOpen && !ownedItem && !waitingItem) ? "" : "disabled"}>${btnLabel}</button>
+            ${(ownedItem || waitingItem) ? "" : `<button class="pill-btn outline small goal-star${m.goal_reward_id === r.id ? " on" : ""}" type="button" data-goal="${r.id}" title="Save for this">${m.goal_reward_id === r.id ? "⭐ Goal" : "☆ Save"}</button>`}
           </div>`;
         });
+        body += `</div>`;
       });
     } else if(state.kidTab === "activity"){
       const mine = state.txns.filter(t => t.member_id === m.id).slice(0, 30);
