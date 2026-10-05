@@ -76,6 +76,38 @@
   }
 
 
+
+  /* Chore cards */
+  .chore-card{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:12px 14px;margin-bottom:10px;transition:transform .15s}
+  .cc-ic{width:54px;height:54px;border-radius:18px;display:grid;place-items:center;font-size:30px;flex:none;background:var(--green-light)}
+  .cc-body{flex:1;min-width:0}
+  .cc-title{font-weight:800;font-size:1.02rem;line-height:1.25}
+  .cc-sub{font-size:.8rem;color:var(--text-dim);margin-top:3px;font-weight:700}
+  .cc-say{border:0;background:none;font-size:1rem;cursor:pointer;padding:0 2px;vertical-align:middle}
+  .cc-btn{border:0;background:var(--green);color:#fff;font:inherit;font-weight:800;font-size:.9rem;padding:11px 16px;border-radius:999px;cursor:pointer;white-space:nowrap;transition:transform .12s}
+  .cc-btn:active{transform:scale(.94)}
+  .cc-btn.popped{background:#2fb892;animation:ccpop .45s cubic-bezier(.3,1.6,.5,1)}
+  @keyframes ccpop{0%{transform:scale(.8)}100%{transform:scale(1)}}
+  .cc-wait{font-size:.78rem;font-weight:800;color:var(--text-dim);text-align:center;max-width:110px;display:block}
+  .chore-card.sent{opacity:.85}
+  .chore-card.celebrate{transform:scale(1.02)}
+  .coin-pop{position:fixed;z-index:60;pointer-events:none;font-size:22px;font-weight:800;color:#e0a800;animation:coinup 1.1s ease-out forwards}
+  @keyframes coinup{0%{opacity:1;transform:translateY(0) scale(.8)}100%{opacity:0;transform:translateY(-90px) scale(1.2)}}
+  body[data-kid="anna"] .chore-card{border:0;border-radius:24px;box-shadow:0 6px 16px rgba(214,38,140,.18);padding:14px 16px}
+  body[data-kid="anna"] .cc-ic{width:62px;height:62px;border-radius:50%;font-size:34px}
+  body[data-kid="anna"] .chore-card:nth-child(4n+1) .cc-ic{background:#ffd3ea}
+  body[data-kid="anna"] .chore-card:nth-child(4n+2) .cc-ic{background:#d7f7ec}
+  body[data-kid="anna"] .chore-card:nth-child(4n+3) .cc-ic{background:#e6e0ff}
+  body[data-kid="anna"] .chore-card:nth-child(4n+4) .cc-ic{background:#fff0c7}
+  body[data-kid="anna"] .cc-title{font-size:1.15rem}
+  body[data-kid="anna"] .cc-btn{background:#ff3d9e;font-size:1.02rem;padding:13px 20px;box-shadow:0 4px 10px rgba(255,61,158,.35)}
+  body[data-kid="anna"] .cc-btn.popped{background:#2fb892;box-shadow:none}
+  body[data-kid="ryan"] .chore-card{border:0;border-radius:0;background:#d4d0c8;box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #fff,inset -2px -2px #808080,inset 2px 2px #dfdfdf}
+  body[data-kid="ryan"] .cc-ic{border-radius:0;background:#fff;box-shadow:inset 1px 1px #808080,inset -1px -1px #dfdfdf;width:48px;height:48px;font-size:26px}
+  body[data-kid="ryan"] .cc-title{font-family:"Courier New",monospace}
+  body[data-kid="ryan"] .cc-btn{border-radius:0;background:#c0c0c0;color:#000;box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #fff,inset -2px -2px #808080,inset 2px 2px #dfdfdf;font-family:"Courier New",monospace}
+  body[data-kid="ryan"] .cc-btn.popped{background:#c3e5c3}
+  body[data-kid="ryan"] .cc-wait{font-family:"Courier New",monospace}
   /* Kid wallet: saving goal + Anna's coin jar + Ryan's bank terminal */
   .bump{display:inline-block;margin-top:6px;background:rgba(255,255,255,.25);padding:4px 12px;border-radius:999px;font-size:.8rem;font-weight:800;animation:bump 1.2s ease}
   @keyframes bump{0%{transform:scale(.6);opacity:0}60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
@@ -1363,6 +1395,72 @@
     reload();
   }
 
+  // ------------------------------------------------------------- Chore cards
+  // A big picture, the chore in plain words, what it pays, and one clear button.
+  const CHORE_EMOJI = [
+    [/dish|plate|cup/i,"🍽️"],[/trash|garbage|bin|recycl/i,"🗑️"],[/\bbed\b|sheets|pillow/i,"🛏️"],[/dog|cat|pet|fish|feed/i,"🐶"],
+    [/laundry|clothes|fold|hamper/i,"🧺"],[/vacuum|sweep|mop|floor/i,"🧹"],[/table|set the|silverware/i,"🍴"],[/toy|tidy|clean (up )?(my |your )?room|pick up/i,"🧸"],
+    [/teeth|brush|bath|shower|hair|hygiene|floss/i,"🪥"],[/homework|read|book|study|learn|practice/i,"📚"],[/kind|help|nice|share|compliment/i,"💛"],
+    [/garden|yard|water|plant|weed|lawn/i,"🌱"],[/wipe|dust|window|counter|sponge|clean/i,"🧽"],[/cook|meal|dinner|lunch|breakfast|snack/i,"🍳"],
+    [/car\b/i,"🚗"],[/toilet|bathroom/i,"🚽"],[/mail|package/i,"📬"],[/baby|sibling|brother|sister/i,"🧸"]
+  ];
+  const CHORE_CAT_EMOJI = {"Cleaning":"🧽","Care & Kindness":"💛","Hygiene":"🪥","Learning":"📚","Family Help":"🏠","Finch":"🐦"};
+  function choreEmoji(chore){
+    const t = chore ? String(chore.title || "") : "";
+    for(const [re, e] of CHORE_EMOJI) if(re.test(t)) return e;
+    return (chore && CHORE_CAT_EMOJI[chore.category]) || "⭐";
+  }
+  function dueText(iso){
+    if(!iso) return "";
+    const today = localISO(new Date());
+    if(iso === today) return "due today";
+    const t = new Date(); t.setDate(t.getDate() + 1);
+    if(iso === localISO(t)) return "due tomorrow";
+    if(iso < today) return "was due " + new Date(iso + "T00:00:00").toLocaleDateString(undefined, {weekday:"long"});
+    return "due " + new Date(iso + "T00:00:00").toLocaleDateString(undefined, {weekday:"long"});
+  }
+  function speakText(text){
+    try{ if(window.speechSynthesis){ speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.rate = .9; speechSynthesis.speak(u); } }catch(e){}
+  }
+  function choreCard(chore, opts){
+    const theme = document.body.dataset.kid || "";
+    const title = chore ? chore.title : "Chore";
+    const pay = chore ? fmt(chore.default_payout) : "";
+    const sub = [pay, opts.due ? dueText(opts.due) : ""].filter(Boolean).join(" · ");
+    let act = "";
+    if(opts.state === "submitted"){
+      act = `<span class="cc-wait">${theme === "anna" ? "💤 Waiting for Mom" : theme === "ryan" ? "SENT. Pending approval." : "Submitted"}</span>`;
+    } else if(opts.markId){
+      act = `<button class="cc-btn" type="button" data-cmark="${opts.markId}">${theme === "ryan" ? "Mark done" : "I did it!"}</button>`;
+    } else {
+      act = `<button class="cc-btn" type="button" data-cearn="${chore.id}">${theme === "ryan" ? "Log it " : "I did it! "}${pay}</button>`;
+    }
+    const say = theme === "anna" ? `<button class="cc-say" type="button" data-say="${escapeHtml(title + (pay ? ". It pays " + pay.replace("$", "") + " dollars." : ""))}" aria-label="Read aloud">🔊</button>` : "";
+    return `<div class="chore-card${opts.state === "submitted" ? " sent" : ""}"><div class="cc-ic">${choreEmoji(chore)}</div>
+      <div class="cc-body"><div class="cc-title">${escapeHtml(title)} ${say}</div><div class="cc-sub">${sub}</div></div><div class="cc-act">${act}</div></div>`;
+  }
+  // Tap feedback: the button turns into a happy "Sent!" and a few coins pop, then the real action runs.
+  function wireChoreCards(){
+    app.querySelectorAll(".cc-say").forEach(b => b.addEventListener("click", e => { e.stopPropagation(); speakText(b.dataset.say); }));
+    app.querySelectorAll(".cc-btn").forEach(btn => btn.addEventListener("click", () => {
+      if(btn.dataset.busy) return;
+      btn.dataset.busy = "1";
+      btn.classList.add("popped"); btn.textContent = document.body.dataset.kid === "ryan" ? "SENT ✓" : "Sent! ✓";
+      const card = btn.closest(".chore-card"); if(card) card.classList.add("celebrate");
+      const r = btn.getBoundingClientRect();
+      for(let i = 0; i < 6; i++){
+        const c = document.createElement("span"); c.className = "coin-pop"; c.textContent = document.body.dataset.kid === "ryan" ? "+" : "🪙";
+        c.style.left = (r.left + r.width / 2 + (Math.random() * 60 - 30)) + "px"; c.style.top = (r.top + 6) + "px"; c.style.animationDelay = (i * 60) + "ms";
+        document.body.appendChild(c); setTimeout(() => c.remove(), 1300);
+      }
+      // Let the happy animation play, then do the real thing (the helpers already ignore a double tap).
+      setTimeout(() => {
+        if(btn.dataset.cmark){ const log = state.logs.find(l => l.id === btn.dataset.cmark); if(log) markChoreDone(log); }
+        else { const chore = state.chores.find(c => c.id === btn.dataset.cearn); if(chore) submitChore(chore, state.activeMemberId); }
+      }, 650);
+    }));
+  }
+
   function renderKidHome(){
     const m = activeMember();
     const myLogs = state.logs.filter(l => l.assigned_member_id === m.id && ["pending","submitted"].includes(l.status));
@@ -1371,18 +1469,12 @@
     let body = "";
     if(state.kidTab === "chores"){
       if(!myLogs.length && !myPendingTxns.filter(t=>t.type==="earn"&&!t.chore_log_id).length){
-        body = `<div class="empty-note">No assigned chores right now. Check "Earn More" to log extra work.</div>`;
+        body = `<div class="empty-note">${document.body.dataset.kid === "anna" ? "🎉 All done for now! Check “Earn More” if you want to help out more." : "No assigned chores right now. Check “Earn More” to log extra work."}</div>`;
       }
       myLogs.forEach(log => {
         const rule = state.rules.find(r => r.id === log.assignment_rule_id);
         const chore = rule && state.chores.find(c => c.id === rule.chore_id);
-        body += `<div class="item-row">
-          <div><div class="title">${escapeHtml(chore ? chore.title : "Chore")}</div>
-          <div class="sub">${chore ? fmt(chore.default_payout) : ""} · due ${log.due_date}</div></div>
-          ${log.status === "pending"
-            ? `<button class="pill-btn" data-mark="${log.id}">Mark done</button>`
-            : `<span class="status-tag submitted">Submitted</span>`}
-        </div>`;
+        body += choreCard(chore, {due: log.due_date, state: log.status === "pending" ? "todo" : "submitted", markId: log.status === "pending" ? log.id : null});
       });
     } else if(state.kidTab === "earn"){
       const byCat = {};
@@ -1390,10 +1482,7 @@
       Object.keys(byCat).forEach(cat => {
         body += `<div class="cat-label">${escapeHtml(cat)}</div>`;
         byCat[cat].forEach(c => {
-          body += `<div class="item-row">
-            <div class="title">${escapeHtml(c.title)}</div>
-            <button class="pill-btn" data-earn="${c.id}">${fmt(c.default_payout)}</button>
-          </div>`;
+          body += choreCard(c, {});
         });
       });
     } else if(state.kidTab === "shop"){
@@ -1518,6 +1607,7 @@
     if(startBtn) startBtn.addEventListener("click", () => startScreenSession(startBtn.dataset.startSession));
     app.querySelectorAll("[data-end-session]").forEach(btn => btn.addEventListener("click", () => finishScreenSession(btn.dataset.endSession)));
     wireScreenTimeStepper();
+    wireChoreCards();
   }
 
   // Shared between kid Shop tab wiring — the stepper has no server round
