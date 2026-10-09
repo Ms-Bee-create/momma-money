@@ -413,21 +413,29 @@
     }
   }
 
-  async function fetchAll(){
+  // Chores, rules, fines, the shop and household settings almost never change, so quiet background
+  // refreshes reuse them for 5 minutes. Anything the person does (buying, approving, editing) does a full read.
+  let slowCache = null;
+  async function fetchAll(light){
+    const useCache = !!(light && slowCache && Date.now() - slowCache.at < 5 * 60 * 1000);
+    const since = new Date(); since.setDate(since.getDate() - 120);
+    const none = Promise.resolve({ data: null });
     const [
       { data: household }, { data: members }, { data: chores }, { data: rules }, { data: logs },
       { data: fines }, { data: rewards }, { data: txns }, { data: sessions }
     ] = await Promise.all([
-      supa.from("households").select("*").eq("id", userId).maybeSingle(),
+      useCache ? none : supa.from("households").select("*").eq("id", userId).maybeSingle(),
       supa.from("members").select("*").eq("household_id", userId).eq("archived", false).order("created_at"),
-      supa.from("chore_templates").select("*").eq("household_id", userId).eq("archived", false).order("category"),
-      supa.from("assignment_rules").select("*").eq("household_id", userId).eq("active", true),
-      supa.from("chore_logs").select("*").eq("household_id", userId).order("due_date", { ascending: false }),
-      supa.from("fine_templates").select("*").eq("household_id", userId).eq("archived", false),
-      supa.from("reward_items").select("*").eq("household_id", userId).eq("archived", false).order("category"),
+      useCache ? none : supa.from("chore_templates").select("*").eq("household_id", userId).eq("archived", false).order("category"),
+      useCache ? none : supa.from("assignment_rules").select("*").eq("household_id", userId).eq("active", true),
+      supa.from("chore_logs").select("*").eq("household_id", userId).gte("due_date", localISO(since)).order("due_date", { ascending: false }),
+      useCache ? none : supa.from("fine_templates").select("*").eq("household_id", userId).eq("archived", false),
+      useCache ? none : supa.from("reward_items").select("*").eq("household_id", userId).eq("archived", false).order("category"),
       supa.from("transactions").select("*").eq("household_id", userId).order("created_at", { ascending: false }).limit(200),
       supa.from("screen_sessions").select("*").eq("household_id", userId).order("created_at", { ascending: false }).limit(50)
     ]);
+    let slow = useCache ? slowCache : { at: Date.now(), household, chores, rules, fines, rewards };
+    if(!useCache && household && rewards) slowCache = slow;
     // Forge Academy's kid profiles (avatar choice lives there). Optional: if it can't be read, wallets just skip the avatar.
     // Only re-read every 10 minutes (avatars almost never change).
     let alKids = state.alKids || [];
@@ -435,9 +443,9 @@
       try{ const r = await supa.from("al_kids").select("id,name,avatar_key").eq("household_id", userId); if(r.data){ alKids = r.data; fetchAll.kidsAt = Date.now(); } }catch(e){}
     }
     return {
-      household: household || { screen_time_rate: 5 },
-      members: members || [], chores: chores || [], rules: rules || [], logs: logs || [],
-      fines: fines || [], rewards: rewards || [], txns: txns || [], sessions: sessions || [], alKids
+      household: slow.household || { screen_time_rate: 5 },
+      members: members || [], chores: slow.chores || [], rules: slow.rules || [], logs: logs || [],
+      fines: slow.fines || [], rewards: slow.rewards || [], txns: txns || [], sessions: sessions || [], alKids
     };
   }
 
@@ -460,7 +468,7 @@
   // only re-renders when there is actually something new to show.
   let lastDataSig = "";
   async function reload(quiet){
-    const data = await fetchAll();
+    const data = await fetchAll(!!quiet);
     await applyDueOvertimeCharges(data.members);
     const sig = JSON.stringify([data.household, data.members, data.txns, data.sessions, data.logs, data.chores, data.fines, data.rewards, data.alKids]);
     if(quiet && sig === lastDataSig) return;
