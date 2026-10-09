@@ -429,8 +429,11 @@
       supa.from("screen_sessions").select("*").eq("household_id", userId).order("created_at", { ascending: false }).limit(50)
     ]);
     // Forge Academy's kid profiles (avatar choice lives there). Optional: if it can't be read, wallets just skip the avatar.
-    let alKids = [];
-    try{ const r = await supa.from("al_kids").select("id,name,avatar_key").eq("household_id", userId); alKids = r.data || []; }catch(e){}
+    // Only re-read every 10 minutes (avatars almost never change).
+    let alKids = state.alKids || [];
+    if(!fetchAll.kidsAt || Date.now() - fetchAll.kidsAt > 10 * 60 * 1000){
+      try{ const r = await supa.from("al_kids").select("id,name,avatar_key").eq("household_id", userId); if(r.data){ alKids = r.data; fetchAll.kidsAt = Date.now(); } }catch(e){}
+    }
     return {
       household: household || { screen_time_rate: 5 },
       members: members || [], chores: chores || [], rules: rules || [], logs: logs || [],
@@ -1330,8 +1333,9 @@ var SHOP_SPRITE = [
       const active = document.activeElement;
       const typing = active && ["INPUT", "SELECT", "TEXTAREA"].includes(active.tagName);
       const sheetOpen = document.querySelector(".overlay.open");
-      if(!typing && !sheetOpen && !document.hidden) reload(true);
-    }, 15000);
+      // 45s instead of 15s, and stop entirely after 15 minutes with no touch, to keep Supabase usage down.
+      if(!typing && !sheetOpen && !document.hidden && Date.now() - lastActivityAt < 15 * 60 * 1000) reload(true);
+    }, 45000);
     // Coming back to the app (unlocking the phone, switching tabs) should
     // show current data right away, not up to 15 seconds later.
     if(!startAutoRefresh.wired){
