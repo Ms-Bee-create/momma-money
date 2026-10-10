@@ -225,6 +225,20 @@
   body[data-kid="ryan"] .shop-buy{font-family:"Courier New",monospace;font-weight:700;letter-spacing:.5px}
   body[data-kid="ryan"] .shop-card{border-top:0}
   body[data-kid="ryan"] .shop-card.owned{background:#9aa;}
+  /* Celebration popup for special awards */
+  .celebrate-overlay{position:fixed;inset:0;z-index:60;background:rgba(20,10,30,.6);display:flex;align-items:center;justify-content:center;padding:18px}
+  .celebrate-card{background:#fff;border-radius:24px;padding:26px 22px;text-align:center;max-width:380px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.35);animation:celPop .45s cubic-bezier(.2,1.4,.4,1)}
+  @keyframes celPop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+  .celebrate-emoji{font-size:3.6rem;line-height:1}
+  .celebrate-title{font-weight:800;font-size:1.5rem;margin:8px 0 6px}
+  .celebrate-msg{font-size:1.05rem;line-height:1.4;margin-bottom:10px}
+  .celebrate-amt{font-weight:800;font-size:2.2rem;color:var(--green-dark);margin-bottom:14px}
+  .celebrate-overlay.anna .celebrate-card{background:linear-gradient(160deg,#fff,#ffe3f3);border:3px solid #ff4fa8}
+  .celebrate-overlay.anna .celebrate-title{color:#d6268c}
+  .celebrate-overlay.ryan .celebrate-card{background:#c0c0c0;border-radius:0;padding:0 0 18px;box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #fff,inset -2px -2px #808080,inset 2px 2px #dfdfdf,0 12px 40px rgba(0,0,0,.5);font-family:"Courier New",monospace}
+  .celebrate-bar{background:linear-gradient(90deg,#000080,#1084d0);color:#fff;font-weight:700;font-size:.8rem;padding:4px 8px;display:flex;justify-content:space-between;margin-bottom:14px}
+  .celebrate-overlay.ryan .celebrate-amt{background:#000;color:#4dff88;display:inline-block;padding:2px 14px;text-shadow:0 0 6px rgba(77,255,136,.6)}
+  .celebrate-overlay.ryan .primary-btn{border-radius:0;width:auto;padding:6px 28px}
   /* Storefront shop */
   .storefront{border-radius:18px;overflow:hidden;margin-bottom:16px;background:var(--card,#fff);box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center}
   .storefront .awning{height:26px;background:repeating-linear-gradient(90deg,#e0562d 0 28px,#fff 28px 56px);border-bottom:4px solid rgba(0,0,0,.12);border-radius:0 0 14px 14px / 0 0 10px 10px}
@@ -1893,6 +1907,32 @@ var SHOP_SPRITE = [
       <div class="cc-body"><div class="cc-title">${escapeHtml(title)} ${say}</div><div class="cc-sub">${sub}</div></div><div class="cc-act">${act}</div></div>`;
   }
   // Tap feedback: the button turns into a happy "Sent!" and a few coins pop, then the real action runs.
+  // A special award pops up on the kid's own screen once. In Quick -> Custom -> Award, start the reason with
+  // a star (like "🌟 Great job being honest!") and the next time that kid opens their profile they get a
+  // celebration with the message and the amount, one time per device.
+  function maybeCelebrate(m, theme){
+    let seen = [];
+    try{ seen = JSON.parse(localStorage.getItem("mm_celebrated_v1") || "[]"); }catch(e){}
+    const t = state.txns.find(x => x.member_id === m.id && x.type === "earn" && x.status === "approved"
+      && String(x.description || "").trim().startsWith("🌟") && seen.indexOf(x.id) < 0);
+    if(!t || document.getElementById("celebrateOverlay")) return;
+    seen.push(t.id);
+    try{ localStorage.setItem("mm_celebrated_v1", JSON.stringify(seen.slice(-50))); }catch(e){}
+    const msg = String(t.description).trim().replace(/^🌟\s*/, "");
+    const ov = document.createElement("div");
+    ov.id = "celebrateOverlay";
+    ov.className = "celebrate-overlay " + (theme || "");
+    ov.innerHTML = `<div class="celebrate-card">
+      ${theme === "ryan" ? `<div class="celebrate-bar"><span>ACHIEVEMENT.EXE</span><span>_ □ X</span></div>` : ""}
+      <div class="celebrate-emoji" aria-hidden="true">${theme === "ryan" ? "🏆" : "🎉"}</div>
+      <div class="celebrate-title">${theme === "ryan" ? "ACHIEVEMENT UNLOCKED" : "Great job!"}</div>
+      <div class="celebrate-msg">${escapeHtml(msg)}</div>
+      <div class="celebrate-amt">+${fmt(t.amount)}</div>
+      <button type="button" class="primary-btn" id="celebrateOk">${theme === "ryan" ? "OK" : "Yay!"}</button>
+    </div>`;
+    document.body.appendChild(ov);
+    ov.querySelector("#celebrateOk").addEventListener("click", () => ov.remove());
+  }
   function wireChoreCards(){
     app.querySelectorAll(".cc-say").forEach(b => b.addEventListener("click", e => { e.stopPropagation(); speakText(b.dataset.say); }));
     app.querySelectorAll(".cc-btn").forEach(btn => btn.addEventListener("click", () => {
@@ -2060,6 +2100,7 @@ var SHOP_SPRITE = [
     app.querySelectorAll("[data-end-session]").forEach(btn => btn.addEventListener("click", () => finishScreenSession(btn.dataset.endSession)));
     wireScreenTimeStepper();
     wireChoreCards();
+    maybeCelebrate(m, theme);
   }
 
   // Shared between kid Shop tab wiring — the stepper has no server round
