@@ -475,6 +475,7 @@
   // only re-renders when there is actually something new to show.
   let lastDataSig = "";
   async function reload(quiet){
+    if(!clockBase || performance.now() - clockBase.perf > 120000) await syncClock();
     const data = await fetchAll(!!quiet);
     await applyDueOvertimeCharges(data.members);
     const sig = JSON.stringify([data.household, data.members, data.txns, data.sessions, data.logs, data.chores, data.fines, data.rewards, data.alKids]);
@@ -552,12 +553,31 @@
     return state.sessions.find(s => s.member_id === memberId && (s.status === "active" || s.status === "overtime"));
   }
 
+  // A clock a kid can't change. Screen time, store hours and overtime all depend on "what time is it",
+  // and the device clock is easy to set back (that gave one kid hundreds of free minutes). Instead we
+  // ask Supabase for its time (rpc server_time, see supabase/server_time.sql) and then count forward with
+  // performance.now(), which keeps running at the real speed no matter what the device clock is set to.
+  let clockBase = null, clockFailAt = 0;
+  function nowMs(){ return clockBase ? clockBase.server + (performance.now() - clockBase.perf) : Date.now(); }
+  async function syncClock(){
+    if(!clockBase && clockFailAt && performance.now() - clockFailAt < 10 * 60 * 1000) return false;
+    try{
+      const t0 = performance.now();
+      const { data, error } = await supa.rpc("server_time");
+      if(error || !data){ clockFailAt = performance.now() || 1; return false; }
+      const t1 = performance.now();
+      const server = new Date(data).getTime();
+      if(isNaN(server)){ clockFailAt = performance.now() || 1; return false; }
+      clockBase = { server: server + (t1 - t0) / 2, perf: t1 };
+      return true;
+    }catch(e){ clockFailAt = performance.now() || 1; return false; }
+  }
   // Store hours gate purchasing (screen time + reward requests) in the Shop
   // tab — no override, so a closed store is really closed. Starting
   // already-banked screen time is unaffected: he can cash in minutes he's
   // already bought whenever he's ready, per the agreed design.
   function isStoreOpen(){
-    const now = new Date();
+    const now = new Date(nowMs());
     const day = now.getDay(); // 0 Sun .. 6 Sat
     const hour = now.getHours() + now.getMinutes() / 60;
     if(day >= 1 && day <= 5) return hour >= 15 && hour < 17;   // weekdays 3-5pm
@@ -746,7 +766,7 @@ var SHOP_SPRITE = [
   }
   // "Opens in 2 hours" / "Closes in 40 minutes" so a closed store is a plan, not a dead end.
   function storeStatus(){
-    const now = new Date();
+    const now = new Date(nowMs());
     const win = d => { const day = d.getDay(); return day >= 1 && day <= 5 ? [15,17] : day === 6 ? [9,18] : [12,17]; };
     const at = (d, h) => { const x = new Date(d); x.setHours(Math.floor(h), Math.round((h % 1) * 60), 0, 0); return x; };
     const mins = ms => Math.max(1, Math.round(ms / 60000));
@@ -813,7 +833,7 @@ var SHOP_SPRITE = [
     if(session){
       const isOvertime = session.status === "overtime";
       const total = Math.max(1, Number(session.minutes) || 1) * 60000;
-      const pct = Math.max(0, Math.min(100, (new Date(session.ends_at).getTime() - Date.now()) / total * 100));
+      const pct = Math.max(0, Math.min(100, (new Date(session.ends_at).getTime() - nowMs()) / total * 100));
       const sparkle = theme === "anna" ? "✨ Sparkle power" : theme === "ryan" ? "BATTERY" : "Screen time running";
       return `<div class="card screen-card" style="text-align:center;${isOvertime ? "border-color:var(--red);background:var(--red-light);" : ""}">
         <div class="kicker" style="${isOvertime ? "color:var(--red);" : ""}">${isOvertime ? "⏰ Time's up — playing overtime" : sparkle}</div>
@@ -1008,7 +1028,8 @@ var SHOP_SPRITE = [
         (cur.screen_minutes_balance || 0) > 0 ? { screen_minutes_balance: 0 } : null);
       const minutes = taken && !taken.unchanged ? (taken.before.screen_minutes_balance || 0) : 0;
       if(minutes <= 0){ reload(); return; }
-      const startedAt = new Date();
+      await syncClock();
+      const startedAt = new Date(nowMs());
       const endsAt = new Date(startedAt.getTime() + minutes * 60000);
       const { error } = await supa.from("screen_sessions").insert({
         household_id: userId, member_id: memberId, minutes,
@@ -1034,7 +1055,8 @@ var SHOP_SPRITE = [
   //    instead of up to whenever the check finally noticed
   async function finishScreenSession(sessionId, opts){
     return once("finish:" + sessionId, async () => {
-      const endedAt = (opts && opts.endedAtMs) || Date.now();
+      await syncClock();
+      const endedAt = (opts && opts.endedAtMs) || nowMs();
       // Claim the session so two taps or two devices can't both settle it
       // (which is how a single overtime used to be charged twice).
       const { data: claimed } = await supa.from("screen_sessions")
@@ -1043,7 +1065,8 @@ var SHOP_SPRITE = [
       const session = claimed[0];
       const endsAtMs = new Date(session.ends_at).getTime();
       if(endedAt < endsAtMs){
-        const unused = Math.floor((endsAtMs - endedAt) / 60000);
+        // Never give back more than was bought, whatever the clocks say.
+        const unused = Math.min(Number(session.minutes) || 0, Math.floor((endsAtMs - endedAt) / 60000));
         if(unused > 0){
           await adjustMember(session.member_id, cur => ({ screen_minutes_balance: (cur.screen_minutes_balance || 0) + unused }));
           showToast(`Stopped — ${unused} min put back in the bank`);
@@ -1066,7 +1089,7 @@ var SHOP_SPRITE = [
   async function chargeOvertimeTomorrow(memberId, minutes){
     const rate = Number(state.household.screen_time_rate) || 5; // minutes per $1
     const cost = round2(minutes / rate);
-    const tomorrow = new Date();
+    const tomorrow = new Date(nowMs());
     tomorrow.setDate(tomorrow.getDate() + 1);
     // adjustMember (not a blind overwrite) so two overtimes ending close
     // together add up instead of one erasing the other.
@@ -1084,7 +1107,7 @@ var SHOP_SPRITE = [
   // lands first "wins" the charge, and the loser's update matches zero rows
   // and skips inserting a fine — instead of both of them charging it.
   async function applyDueOvertimeCharges(members){
-    const today = localISO(new Date());
+    const today = localISO(new Date(nowMs()));
     const due = members.filter(m =>
       Number(m.pending_overtime_charge) > 0 && m.pending_overtime_charge_date && m.pending_overtime_charge_date <= today
     );
@@ -1349,7 +1372,7 @@ var SHOP_SPRITE = [
       const typing = active && ["INPUT", "SELECT", "TEXTAREA"].includes(active.tagName);
       const sheetOpen = document.querySelector(".overlay.open");
       // 45s instead of 15s, and stop entirely after 15 minutes with no touch, to keep Supabase usage down.
-      if(!typing && !sheetOpen && !document.hidden && Date.now() - lastActivityAt < 15 * 60 * 1000) reload(true);
+      if(!typing && !sheetOpen && !document.hidden && performance.now() - lastActivityAt < 15 * 60 * 1000) reload(true);
     }, 45000);
     // Coming back to the app (unlocking the phone, switching tabs) should
     // show current data right away, not up to 15 seconds later.
@@ -1371,9 +1394,9 @@ var SHOP_SPRITE = [
   // tablet sitting idle on the Household tab never stops a kid's session
   // that's actually still running fine on his own device.
   const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
-  let lastActivityAt = Date.now();
+  let lastActivityAt = performance.now();
   ["mousemove", "mousedown", "keydown", "touchstart", "scroll"].forEach(evt => {
-    document.addEventListener(evt, () => { lastActivityAt = Date.now(); }, { passive: true });
+    document.addEventListener(evt, () => { lastActivityAt = performance.now(); }, { passive: true });
   });
 
   // Drain the battery picture to match the countdown; the "5 minutes left" note shows once, gently.
@@ -1396,13 +1419,13 @@ var SHOP_SPRITE = [
     countdownInterval = setInterval(() => {
       document.querySelectorAll("[data-countdown]").forEach(el => {
         const endsAt = new Date(el.dataset.countdown).getTime();
-        const remainingMs = endsAt - Date.now();
+        const remainingMs = endsAt - nowMs();
         const isOwnScreen = state.activeMemberId === el.dataset.memberId;
-        if(isOwnScreen && !el.dataset.idleStopFired && (Date.now() - lastActivityAt) > IDLE_TIMEOUT_MS){
+        if(isOwnScreen && !el.dataset.idleStopFired && (performance.now() - lastActivityAt) > IDLE_TIMEOUT_MS){
           el.dataset.idleStopFired = "1";
           // Count time only up to the last touch, and (if it was still
           // within the paid-for time) the unused minutes go back in the bank.
-          finishScreenSession(el.dataset.sessionId, { endedAtMs: lastActivityAt });
+          finishScreenSession(el.dataset.sessionId, { endedAtMs: nowMs() - (performance.now() - lastActivityAt) });
           return;
         }
         if(remainingMs <= 0){
