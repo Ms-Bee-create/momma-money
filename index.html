@@ -218,6 +218,13 @@
   .hero-pet{width:64px;height:54px}
   body[data-kid="ryan"] .hero-av{border-radius:0;border:2px solid #4dff88}
   body[data-kid="ryan"] .hero-pet{background:#fff;padding:2px;box-shadow:inset 1px 1px #808080,inset -1px -1px #fff}
+  /* Ryan's shop: a retro software store */
+  body[data-kid="ryan"] .cat-label{background:#000080;color:#fff;font-family:"Courier New",monospace;letter-spacing:1px;padding:3px 8px;margin:14px 0 8px}
+  body[data-kid="ryan"] .cat-label::before{content:"▸ ";}
+  body[data-kid="ryan"] #stMinutes{background:#000;color:#4dff88;font-family:"Courier New",monospace;padding:2px 10px;box-shadow:inset 1px 1px #808080,inset -1px -1px #fff;text-shadow:0 0 6px rgba(77,255,136,.6)}
+  body[data-kid="ryan"] .shop-buy{font-family:"Courier New",monospace;font-weight:700;letter-spacing:.5px}
+  body[data-kid="ryan"] .shop-card{border-top:0}
+  body[data-kid="ryan"] .shop-card.owned{background:#9aa;}
   /* Storefront shop */
   .storefront{border-radius:18px;overflow:hidden;margin-bottom:16px;background:var(--card,#fff);box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center}
   .storefront .awning{height:26px;background:repeating-linear-gradient(90deg,#e0562d 0 28px,#fff 28px 56px);border-bottom:4px solid rgba(0,0,0,.12);border-radius:0 0 14px 14px / 0 0 10px 10px}
@@ -1928,7 +1935,7 @@ var SHOP_SPRITE = [
       body += `<div class="storefront ${ss.open ? "open" : "closed"}">
         <div class="awning" aria-hidden="true"></div>
         <div class="sf-body">
-          <div class="sf-name">${shopTheme === "ryan" ? "SHOP.EXE" : shopTheme === "anna" ? "🛍️ " + escapeHtml(m.name) + "'s Shop" : "🛍️ The Shop"}</div>
+          <div class="sf-name">${shopTheme === "ryan" ? "SOFTWARE STORE v1.0" : shopTheme === "anna" ? "🛍️ " + escapeHtml(m.name) + "'s Shop" : "🛍️ The Shop"}</div>
           <div class="sf-sign">${ss.open ? "🟢 We're open!" : "🌙 Closed for now"}</div>
           <div class="sf-when">${ss.text}</div>
           <div class="sf-hours">${STORE_HOURS_TEXT}</div>
@@ -1957,7 +1964,8 @@ var SHOP_SPRITE = [
           // Pets/accessories are one-per-kid: once bought (or requested) the button says so instead of letting a second one through.
           const mineFor = st => r.grants && state.txns.some(t => t.member_id === m.id && t.reward_item_id === r.id && t.type === "spend" && t.status === st);
           const ownedItem = mineFor("approved"), waitingItem = !ownedItem && mineFor("pending");
-          const btnLabel = ownedItem ? "Owned ✓" : waitingItem ? "Waiting…" : fmt(r.cost);
+          const isRy = kidTheme(m) === "ryan";
+          const btnLabel = ownedItem ? (isRy ? "INSTALLED ✓" : "Owned ✓") : waitingItem ? (isRy ? "PENDING…" : "Waiting…") : (isRy ? "INSTALL " + fmt(r.cost) : fmt(r.cost));
           const shortTitle = String(r.title).replace(/^(Pet|Accessory):\s*/, "");
           body += `<div class="shop-card${ownedItem ? " owned" : ""}">
             <div class="shop-pic">${shopPicture(r)}</div>
@@ -1975,7 +1983,7 @@ var SHOP_SPRITE = [
     const theme = kidTheme(m);
     document.body.dataset.kid = theme;
     app.innerHTML = `
-      ${theme === "ryan" ? `<div class="r-bar"><span>C:\\MOMMA_BANK\\WALLET.EXE</span><span>_ □ X</span></div>` : ""}
+      ${theme === "ryan" ? `<div class="r-bar"><span>C:\\MOMMA_BANK\\${({chores:"CHORES.EXE", shop:"SHOP.EXE", activity:"STATEMENT.EXE", earn:"EARN.EXE"})[state.kidTab] || "WALLET.EXE"}</span><span>_ □ X</span></div>` : ""}
       ${switchProfileHeader()}
       ${walletHero(m, theme)}
       ${goalCard(m, theme)}
