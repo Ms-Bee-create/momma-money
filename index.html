@@ -250,6 +250,9 @@
   .quest-head.anna .quest-bar{background:rgba(255,255,255,.7)}.quest-head.anna .quest-bar i{background:linear-gradient(90deg,#ff8fc7,#ff4fa8)}
   .quest-head.ryan{border:0;border-radius:0;background:#c0c0c0;font-family:"Courier New",monospace;box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #fff,inset -2px -2px #808080,inset 2px 2px #dfdfdf}
   .quest-head.ryan .quest-bar{border-radius:0;background:#000}.quest-head.ryan .quest-bar i{border-radius:0;background:#4dff88}
+  .quest-lock{background:var(--gold-light);color:var(--gold-dark);font-weight:800;font-size:.85rem;border-radius:14px;padding:9px 12px;margin:6px 0}
+  .quest-lock.ok{background:var(--green-light);color:var(--green-dark)}
+  body[data-kid="ryan"] .quest-lock{border-radius:0;font-family:"Courier New",monospace}
   /* Storefront shop */
   .storefront{border-radius:18px;overflow:hidden;margin-bottom:16px;background:var(--card,#fff);box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center}
   .storefront .awning{height:26px;background:repeating-linear-gradient(90deg,#e0562d 0 28px,#fff 28px 56px);border-bottom:4px solid rgba(0,0,0,.12);border-radius:0 0 14px 14px / 0 0 10px 10px}
@@ -608,6 +611,8 @@
   // already bought whenever he's ready, per the agreed design.
   function isStoreOpen(){
     const now = new Date(nowMs());
+    // The Banker can open the shop for the whole day (Manage, Home Quest).
+    if(state.household && state.household.home_gate_open_day === localISO(now)) return true;
     const day = now.getDay(); // 0 Sun .. 6 Sat
     const hour = now.getHours() + now.getMinutes() / 60;
     if(day >= 1 && day <= 5) return hour >= 15 && hour < 17;   // weekdays 3-5pm
@@ -881,7 +886,9 @@ var SHOP_SPRITE = [
         <div style="font-size:1.6rem;font-weight:800;">${m.screen_minutes_balance} min</div>
         ${isBanker
           ? `<div style="font-size:0.8rem;color:var(--text-dim);">Not started yet</div>`
-          : `<button class="pill-btn" data-start-session="${m.id}" style="margin-top:8px;">▶ Start screen time</button>`}
+          : (isStoreOpen() && questGate(m).ok
+            ? `<button class="pill-btn" data-start-session="${m.id}" style="margin-top:8px;">▶ Start screen time</button>`
+            : `<div style="font-size:0.82rem;color:var(--text-dim);margin-top:8px;font-weight:700;">${!questGate(m).ok ? "🔒 Finish your Home Quest jobs, then it opens at store hours." : "⏰ Screen time starts when the shop opens: " + escapeHtml(storeStatus().text)}</div>`)}
       </div>`;
     }
     return "";
@@ -994,7 +1001,10 @@ var SHOP_SPRITE = [
 
   async function requestReward(item, memberId){
     return once("reward:" + memberId + ":" + item.id, async () => {
+      await syncClock();
       const m = member(memberId);
+      if(m && !questGate(m).ok){ showToast("Finish your Home Quest jobs first"); return; }
+      if(!isStoreOpen()){ showToast("The shop is closed right now"); return; }
       if(m && (m.bankrupt || spendableFor(m) < Number(item.cost))){
         showToast("Not enough in the balance for that yet");
         return;
@@ -1019,7 +1029,10 @@ var SHOP_SPRITE = [
 
   async function requestScreenTime(minutes, memberId){
     return once("screen:" + memberId, async () => {
+      await syncClock();
       const m = member(memberId);
+      if(m && !questGate(m).ok){ showToast("Finish your Home Quest jobs first"); return; }
+      if(!isStoreOpen()){ showToast("The shop is closed right now"); return; }
       const cost = screenTimeCost(minutes);
       if(m && (m.bankrupt || spendableFor(m) < cost)){
         showToast(`Not enough — ${minutes} min costs ${fmt(cost)}`);
@@ -1047,6 +1060,10 @@ var SHOP_SPRITE = [
   // the tab to make more time appear later.
   async function startScreenSession(memberId){
     return once("start:" + memberId, async () => {
+      await syncClock();
+      const mm = member(memberId);
+      if(mm && !questGate(mm).ok){ showToast("Finish your Home Quest jobs first"); return; }
+      if(!isStoreOpen()){ showToast("Screen time opens when the shop opens"); return; }
       // Only one running session per kid, checked against the server (not
       // the in-memory copy) so a second device can't start a parallel one.
       const { data: running } = await supa.from("screen_sessions").select("id")
@@ -1941,6 +1958,18 @@ var SHOP_SPRITE = [
     const t = questToday();
     return (state.homeLogs || []).find(l => l.job_id === job.id && l.day === t.iso) || null;
   }
+  // The Shop and starting screen time stay locked until today's morning and after-school jobs are done
+  // (marked done by the kid; the Banker can still send one back). Evening jobs happen after the shop closes,
+  // so they do not hold it back. The Banker can switch the lock off or open the shop for the day.
+  function questGate(m){
+    const hh = state.household || {};
+    const t = questToday();
+    const jobs = questJobsFor(m).filter(j => ["morning", "after_school", "weekend"].indexOf(j.slot) >= 0);
+    const remaining = jobs.filter(j => { const l = questLogFor(j); return !(l && (l.status === "submitted" || l.status === "approved")); });
+    const enabled = hh.home_gate !== false;
+    const overridden = hh.home_gate_open_day === t.iso;
+    return { enabled, overridden, total: jobs.length, remaining, ok: !enabled || overridden || !jobs.length || !remaining.length };
+  }
   function questCard(job, theme){
     const log = questLogFor(job);
     const st = log ? log.status : "todo";
@@ -1966,6 +1995,10 @@ var SHOP_SPRITE = [
         <div class="quest-xp">${lv.into} / ${lv.per} XP to Level ${lv.level + 1} · +${fmt(questLevelBonus())} at the next level</div></div>
     </div>`;
     if(!jobs.length) return h + `<div class="empty-note">${theme === "anna" ? "🎉 No jobs today!" : "No home jobs scheduled today."}</div>`;
+    const gate = questGate(m);
+    if(gate.enabled && !gate.overridden && gate.total){
+      h += `<div class="quest-lock ${gate.ok ? "ok" : ""}">${gate.ok ? "✅ Jobs done! The shop and screen time open at store hours." : "🔒 Finish " + gate.remaining.length + " more job" + (gate.remaining.length === 1 ? "" : "s") + " (morning and after school) to unlock the shop and screen time."}</div>`;
+    }
     h += `<div class="quest-prog">${perfect ? "🌈 Perfect day! +10 XP bonus" : `${done} of ${jobs.length} done today${sent ? " · " + sent + " waiting for Mom" : ""}`}</div>`;
     ["morning", "after_school", "evening", "weekend"].forEach(slot => {
       const list = jobs.filter(j => j.slot === slot);
@@ -2094,6 +2127,12 @@ var SHOP_SPRITE = [
         <div style="font-weight:800;margin-bottom:4px;">${auto ? "Jobs are approved automatically" : "You approve each job"}</div>
         <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:10px;">${auto ? "When a kid taps a job, the XP is added right away." : "When a kid taps a job, it waits in Approvals until you tap ✓."}</div>
         <button class="pill-btn outline" id="questAutoToggle" type="button">${auto ? "Turn approval back on" : "Turn off approval (auto-approve)"}</button>
+        <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:12px;">
+          <div style="font-weight:800;margin-bottom:4px;">${state.household.home_gate === false ? "Shop lock is off" : "Shop is locked until jobs are done"}</div>
+          <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:10px;">The Shop and starting screen time unlock when a kid's morning and after-school jobs are done, and then only at store hours.</div>
+          <button class="pill-btn outline" id="questGateToggle" type="button">${state.household.home_gate === false ? "Turn the lock on" : "Turn the lock off"}</button>
+          <button class="pill-btn outline" id="questOpenToday" type="button" style="margin-left:6px;">${state.household.home_gate_open_day === questToday().iso ? "Close the shop again today" : "Open the shop today anyway"}</button>
+        </div>
         <div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap;">
           <label style="font-size:0.85rem;">XP per level <input type="number" id="questPer" min="10" step="10" value="${questPerLevel()}" style="width:80px;"></label>
           <label style="font-size:0.85rem;">Level payout $ <input type="number" id="questBonus" min="0" step="0.25" value="${questLevelBonus()}" style="width:80px;"></label>
@@ -2176,6 +2215,19 @@ var SHOP_SPRITE = [
     if(tog) tog.addEventListener("click", async () => {
       await supa.from("households").update({ home_auto_approve: !state.household.home_auto_approve }).eq("id", userId);
       slowCache = null; showToast(state.household.home_auto_approve ? "Approval is back on" : "Jobs now approve automatically"); reload();
+    });
+    const gtog = document.getElementById("questGateToggle");
+    if(gtog) gtog.addEventListener("click", async () => {
+      const { error } = await supa.from("households").update({ home_gate: state.household.home_gate === false }).eq("id", userId);
+      if(error){ showToast("Run the new shop-lock SQL first (home_gate.sql)"); return; }
+      slowCache = null; showToast(state.household.home_gate === false ? "Shop lock is on" : "Shop lock is off"); reload();
+    });
+    const gopen = document.getElementById("questOpenToday");
+    if(gopen) gopen.addEventListener("click", async () => {
+      const t = questToday();
+      const { error } = await supa.from("households").update({ home_gate_open_day: state.household.home_gate_open_day === t.iso ? null : t.iso }).eq("id", userId);
+      if(error){ showToast("Run the new shop-lock SQL first (home_gate.sql)"); return; }
+      slowCache = null; showToast("Done"); reload();
     });
     const sv = document.getElementById("questSaveSettings");
     if(sv) sv.addEventListener("click", async () => {
@@ -2263,7 +2315,9 @@ var SHOP_SPRITE = [
       });
     } else if(state.kidTab === "shop"){
       const rate = Number(state.household.screen_time_rate) || 5;
-      const storeOpen = isStoreOpen();
+      const gate = questGate(m);
+      const hoursOpen = isStoreOpen();
+      const storeOpen = hoursOpen && gate.ok;
       const spendable = spendableFor(m);
       const pendingScreen = state.txns.some(t => t.member_id === m.id && t.status === "pending" && t.screen_minutes);
       // Cap the stepper at what they can actually pay for (never below 5).
@@ -2271,7 +2325,7 @@ var SHOP_SPRITE = [
       if(state.stMinutes == null || state.stMinutes < 5) state.stMinutes = 15;
       if(state.stMinutes > maxMinutes) state.stMinutes = maxMinutes;
       const canBuy = storeOpen && !m.bankrupt && !pendingScreen && spendable >= screenTimeCost(state.stMinutes);
-      const buyLabel = !storeOpen ? "Store's closed"
+      const buyLabel = !gate.ok ? "Finish your jobs first" : !storeOpen ? "Store's closed"
         : m.bankrupt ? "Bankruptcy protection"
         : pendingScreen ? "Request already waiting"
         : spendable < screenTimeCost(state.stMinutes) ? "Not enough yet"
@@ -2282,8 +2336,12 @@ var SHOP_SPRITE = [
         <div class="awning" aria-hidden="true"></div>
         <div class="sf-body">
           <div class="sf-name">${shopTheme === "ryan" ? "SOFTWARE STORE v1.0" : shopTheme === "anna" ? "🛍️ " + escapeHtml(m.name) + "'s Shop" : "🛍️ The Shop"}</div>
-          <div class="sf-sign">${ss.open ? "🟢 We're open!" : "🌙 Closed for now"}</div>
-          <div class="sf-when">${ss.text}</div>
+          ${!gate.ok
+            ? `<div class="sf-sign">🔒 Locked until your jobs are done</div>
+               <div class="sf-when">${gate.remaining.length} job${gate.remaining.length === 1 ? "" : "s"} to go</div>
+               <button type="button" class="pill-btn" id="gotoQuest" style="margin-top:8px;">Go to Home Quest</button>`
+            : `<div class="sf-sign">${ss.open ? "🟢 We're open!" : "🌙 Closed for now"}</div>
+               <div class="sf-when">${ss.text}</div>`}
           <div class="sf-hours">${STORE_HOURS_TEXT}</div>
         </div>
       </div>`;
@@ -2385,6 +2443,8 @@ var SHOP_SPRITE = [
     wireScreenTimeStepper();
     wireChoreCards();
     wireQuest();
+    const gq = document.getElementById("gotoQuest");
+    if(gq) gq.addEventListener("click", () => { state.kidTab = "quest"; render(); });
     maybeCelebrate(m, theme);
   }
 
