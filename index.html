@@ -253,6 +253,7 @@
   .quest-lock{background:var(--gold-light);color:var(--gold-dark);font-weight:800;font-size:.85rem;border-radius:14px;padding:9px 12px;margin:6px 0}
   .quest-lock.ok{background:var(--green-light);color:var(--green-dark)}
   body[data-kid="ryan"] .quest-lock{border-radius:0;font-family:"Courier New",monospace}
+  .wait-banner{display:block;width:100%;border:0;background:var(--gold);color:#3a2b05;font:inherit;font-weight:800;padding:12px 14px;border-radius:14px;margin:8px 0 12px;cursor:pointer;text-align:center}
   /* Storefront shop */
   .storefront{border-radius:18px;overflow:hidden;margin-bottom:16px;background:var(--card,#fff);box-shadow:0 4px 12px rgba(0,0,0,.1);text-align:center}
   .storefront .awning{height:26px;background:repeating-linear-gradient(90deg,#e0562d 0 28px,#fff 28px 56px);border-bottom:4px solid rgba(0,0,0,.12);border-radius:0 0 14px 14px / 0 0 10px 10px}
@@ -509,13 +510,18 @@
   let lastDataSig = "";
   async function reload(quiet){
     if(!clockBase || performance.now() - clockBase.perf > 120000) await syncClock();
+    const pendingBefore = pendingApprovalCount();
     const data = await fetchAll(!!quiet);
     await applyDueOvertimeCharges(data.members);
     const sig = JSON.stringify([data.household, data.members, data.txns, data.sessions, data.logs, data.chores, data.fines, data.rewards, data.alKids, data.homeJobs, data.homeLogs]);
     if(quiet && sig === lastDataSig) return;
     lastDataSig = sig;
     Object.assign(state, data);
+    // A new request or job landed while a parent has the app open: chime once.
+    const me = state.activeMemberId ? state.members.find(x => x.id === state.activeMemberId) : null;
+    if(quiet && me && me.role === "banker" && pendingApprovalCount() > pendingBefore) playPing();
     render();
+    updateWaitingBadge();
   }
 
   // Local calendar date (YYYY-MM-DD). toISOString() is UTC, which for a US
@@ -1409,6 +1415,7 @@ var SHOP_SPRITE = [
       else renderKidHome();
     }
     startCountdownTicker();
+    updateWaitingBadge();
   }
 
   // Ticks any visible screen-time countdown once a second by writing
@@ -1426,6 +1433,47 @@ var SHOP_SPRITE = [
   // so "the kid just asked" actually shows up without anyone having to
   // manually reload the page — but skips a beat while a sheet is open or
   // someone's mid-typing, so it never yanks focus out from under them.
+  // How many things are waiting for a parent: purchase/chore requests plus Home Quest jobs.
+  function pendingApprovalCount(){
+    return (state.txns || []).filter(t => t.status === "pending").length
+      + (state.homeLogs || []).filter(l => l.status === "submitted" && l.job_id).length;
+  }
+  // The tab title and the home-screen icon show the count, so a parent sees it without opening the app.
+  function updateWaitingBadge(){
+    const me = state.activeMemberId ? (state.members || []).find(x => x.id === state.activeMemberId) : null;
+    const n = me && me.role === "banker" ? pendingApprovalCount() : 0;
+    try{ document.title = (n ? "(" + n + ") " : "") + "Momma $"; }catch(e){}
+    try{
+      if(navigator.setAppBadge){ if(n) navigator.setAppBadge(n); else navigator.clearAppBadge(); }
+    }catch(e){}
+  }
+  function playPing(){
+    try{
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [660, 880].forEach((f, i) => {
+        const osc = ctx.createOscillator(), gain = ctx.createGain(), t = ctx.currentTime + i * 0.16;
+        osc.type = "sine"; osc.frequency.value = f;
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.start(t); osc.stop(t + 0.32);
+      });
+    }catch(e){}
+  }
+  // Live push: when a kid finishes a job or asks for something, Supabase tells this device right away.
+  // (Needs supabase/realtime.sql. Without it the app still checks every 45 seconds.)
+  let liveChannel = null, liveTimer = null;
+  function startRealtime(){
+    if(liveChannel || !supa || !userId) return;
+    try{
+      const nudge = () => { clearTimeout(liveTimer); liveTimer = setTimeout(() => reload(true), 600); };
+      liveChannel = supa.channel("mm-live-" + userId)
+        .on("postgres_changes", { event: "*", schema: "public", table: "home_job_logs" }, nudge)
+        .on("postgres_changes", { event: "*", schema: "public", table: "transactions" }, nudge)
+        .subscribe();
+    }catch(e){ liveChannel = null; }
+  }
   let autoRefreshInterval = null;
   function startAutoRefresh(){
     clearInterval(autoRefreshInterval);
@@ -1434,7 +1482,10 @@ var SHOP_SPRITE = [
       const typing = active && ["INPUT", "SELECT", "TEXTAREA"].includes(active.tagName);
       const sheetOpen = document.querySelector(".overlay.open");
       // 45s instead of 15s, and stop entirely after 15 minutes with no touch, to keep Supabase usage down.
-      if(!typing && !sheetOpen && !document.hidden && performance.now() - lastActivityAt < 15 * 60 * 1000) reload(true);
+      // A parent's device keeps checking for 2 hours without a touch, since waiting for requests is its job.
+      const meNow = state.activeMemberId ? state.members.find(x => x.id === state.activeMemberId) : null;
+      const idleLimit = meNow && meNow.role === "banker" ? 2 * 60 * 60 * 1000 : 15 * 60 * 1000;
+      if(!typing && !sheetOpen && !document.hidden && performance.now() - lastActivityAt < idleLimit) reload(true);
     }, 45000);
     // Coming back to the app (unlocking the phone, switching tabs) should
     // show current data right away, not up to 15 seconds later.
@@ -2740,6 +2791,7 @@ var SHOP_SPRITE = [
       ${switchProfileHeader()}
       <div class="kicker">Banker's Desk</div>
       <h2>Run the household</h2>
+      ${(pendingApprovalCount() && state.kidTab !== "approvals") ? `<button type="button" class="wait-banner" data-tab="approvals">🔔 ${pendingApprovalCount()} waiting for you · tap to review</button>` : ""}
       <div class="tab-row">
         <button class="tab-btn ${state.kidTab==="quick"?"active":""}" data-tab="quick">⚡ Quick</button>
         <button class="tab-btn ${state.kidTab==="approvals"?"active":""}" data-tab="approvals">Approvals${(pendingTxns.length + (state.homeLogs || []).filter(l => l.status === "submitted" && l.job_id).length) ? ` (${pendingTxns.length + (state.homeLogs || []).filter(l => l.status === "submitted" && l.job_id).length})` : ""}</button>
@@ -3154,6 +3206,7 @@ var SHOP_SPRITE = [
     }
     render();
     startAutoRefresh();
+    startRealtime();
   }
 
   if("serviceWorker" in navigator){
