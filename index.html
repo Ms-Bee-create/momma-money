@@ -421,12 +421,12 @@
 
   let supa = null, userId = null, remoteReady = false;
 
-  function showToast(msg){
+  function showToast(msg, ms){
     const t = document.getElementById("toast");
     t.textContent = msg;
     t.classList.add("show");
     clearTimeout(showToast._t);
-    showToast._t = setTimeout(() => t.classList.remove("show"), 2200);
+    showToast._t = setTimeout(() => t.classList.remove("show"), ms || 2200);
   }
 
   // Returns the existing session, or null — no longer auto-creates an
@@ -2097,14 +2097,14 @@ var SHOP_SPRITE = [
       if(btn.dataset.busy) return; btn.dataset.busy = "1";
       btn.classList.add("popped"); btn.textContent = "Sent! ✓";
       const job = (state.homeJobs || []).find(j => j.id === btn.dataset.qdone);
-      if(!job){ showToast("Couldn't find that job — reload the page"); render(); return; }
+      if(!job){ showToast("Couldn't find that job — reload the page", 6000); render(); return; }
       setTimeout(() => markQuestDone(job), 500);
     }));
   }
   async function markQuestDone(job){
     return once("qdone:" + job.id, async () => {
       try{ await markQuestDoneInner(job); }
-      catch(e){ console.error("markQuestDone", e); showToast("Couldn't save that: " + (e && e.message ? e.message : "unknown error")); render(); }
+      catch(e){ console.error("markQuestDone", e); showToast("Couldn't save that: " + (e && e.message ? e.message : "unknown error"), 9000); render(); }
     });
   }
   async function markQuestDoneInner(job){
@@ -2121,7 +2121,7 @@ var SHOP_SPRITE = [
         const { data, error } = await supa.from("home_job_logs").insert({
           household_id: userId, member_id: job.member_id, job_id: job.id, day: t.iso, xp: job.xp, status: "submitted"
         }).select();
-        if(error){ console.error("home_job_logs insert", error); showToast("Couldn't save that: " + (error.message || error.code || "unknown error")); render(); return; }
+        if(error){ console.error("home_job_logs insert", error); showToast("Couldn't save that: " + (error.message || error.code || "unknown error"), 9000); render(); return; }
         log = data && data[0];
       }
       if(log && state.household.home_auto_approve) await approveQuestLog(log, { quiet: true });
