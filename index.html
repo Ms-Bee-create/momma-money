@@ -1370,8 +1370,21 @@ var SHOP_SPRITE = [
     });
   }
 
+  // PINs live on the server (supabase/pin_server.sql). Until that SQL has been run, fall back to the old plain PIN.
+  function hasPin(m){ return m.has_pin === undefined ? !!m.pin : !!m.has_pin; }
+  async function setPinFor(memberId, pin, auth){
+    const r = await supa.rpc("set_member_pin", { p_member: memberId, p_new: pin, p_auth: auth || null });
+    if(r.error){ const u = await supa.from("members").update({ pin }).eq("id", memberId); return { ok: !u.error }; }
+    return r.data || { ok: false };
+  }
+  async function clearPinFor(memberId, auth){
+    const r = await supa.rpc("clear_member_pin", { p_member: memberId, p_auth: auth || null });
+    if(r.error){ const u = await supa.from("members").update({ pin: null }).eq("id", memberId); return { ok: !u.error }; }
+    return r.data || { ok: false };
+  }
   async function addMember(name, role, emoji, pin){
-    await supa.from("members").insert({ household_id: userId, name, role, avatar_emoji: emoji, pin: pin || null });
+    const { data } = await supa.from("members").insert({ household_id: userId, name, role, avatar_emoji: emoji }).select().single();
+    if(pin && data) await setPinFor(data.id, pin, null);
     showToast(`${name} added`);
     reload();
   }
@@ -1561,7 +1574,7 @@ var SHOP_SPRITE = [
     let kidsList = "";
     kids.forEach(k => {
       kidsList += `<div class="member-row">
-        <div class="who"><span class="avatar">${k.avatar_emoji}</span><div class="name">${escapeHtml(k.name)}${k.pin ? " · PIN set" : ""}</div></div>
+        <div class="who"><span class="avatar">${k.avatar_emoji}</span><div class="name">${escapeHtml(k.name)}${hasPin(k) ? " · PIN set" : ""}</div></div>
         <button class="pill-btn small outline" data-remove-kid="${k.id}">Remove</button>
       </div>`;
     });
@@ -1588,7 +1601,7 @@ var SHOP_SPRITE = [
 
       <div class="card">
         <label class="field-label" style="margin-top:0;">Your Banker PIN — optional</label>
-        <input type="text" id="setupBankerPin" maxlength="4" inputmode="numeric" placeholder="e.g. 4321" value="${banker && banker.pin ? escapeHtml(banker.pin) : ""}" />
+        <input type="text" id="setupBankerPin" maxlength="4" inputmode="numeric" placeholder="e.g. 4321" />
       </div>
 
       <button class="primary-btn" id="setupDoneBtn" ${kids.length ? "" : "disabled"}>Start managing →</button>
@@ -1626,7 +1639,7 @@ var SHOP_SPRITE = [
       const pinInput = document.getElementById("setupBankerPin");
       const pin = pinInput.value.trim();
       if(pin.length > 0 && pin.length !== 4){ markInvalid(pinInput, "PIN must be exactly 4 digits"); return; }
-      if(banker) await supa.from("members").update({ pin: pin.length === 4 ? pin : null }).eq("id", banker.id);
+      if(banker && pin.length === 4 && !hasPin(banker)) await setPinFor(banker.id, pin, null);
       try{ localStorage.setItem(SETUP_DONE_KEY, "1"); }catch(e){}
       await reload();
       const freshBanker = state.members.find(m => m.role === "banker");
@@ -1667,7 +1680,7 @@ var SHOP_SPRITE = [
     app.querySelectorAll(".profile-card[data-id]").forEach(btn => {
       btn.addEventListener("click", () => {
         const m = member(btn.dataset.id);
-        if(m.pin){
+        if(hasPin(m)){
           state.pinTargetMember = m.id; state.pinBuffer = ""; state.view = "pin";
         } else {
           enterProfile(m);
@@ -1679,6 +1692,25 @@ var SHOP_SPRITE = [
     if(addBtn) addBtn.addEventListener("click", openAddMemberSheet);
   }
 
+  // The server checks the PIN and answers only yes or no. Five wrong tries lock it for 5 minutes.
+  async function verifyPin(m, tried){
+    if(m.has_pin === undefined){      // server PIN support not installed yet
+      if(tried === m.pin) enterProfile(m); else showToast("Wrong PIN");
+      render(); return;
+    }
+    showToast("Checking…");
+    const { data, error } = await supa.rpc("check_member_pin", { p_member: m.id, p_pin: tried });
+    if(error || !data){ showToast("Couldn't check the PIN. Try again."); render(); return; }
+    if(data.ok){ enterProfile(m); render(); return; }
+    if(data.error === "locked" || data.locked_seconds > 0){
+      const mins = Math.max(1, Math.ceil((data.locked_seconds || 300) / 60));
+      showToast(`Too many tries. Locked for ${mins} minute${mins === 1 ? "" : "s"}.`);
+      state.view = "picker";
+    } else {
+      showToast(data.tries_left != null ? `Wrong PIN. ${data.tries_left} ${data.tries_left === 1 ? "try" : "tries"} left.` : "Wrong PIN");
+    }
+    render();
+  }
   function renderPinPad(){
     const m = member(state.pinTargetMember);
     const dots = [0,1,2,3].map(i => `<span class="${i < state.pinBuffer.length ? "filled" : ""}"></span>`).join("");
@@ -1701,12 +1733,10 @@ var SHOP_SPRITE = [
         if(state.pinBuffer.length >= 4) return;
         state.pinBuffer += n;
         if(state.pinBuffer.length === 4){
-          if(state.pinBuffer === m.pin){
-            enterProfile(m);
-          } else {
-            showToast("Wrong PIN");
-            state.pinBuffer = "";
-          }
+          const tried = state.pinBuffer;
+          state.pinBuffer = "";
+          verifyPin(m, tried);
+          return;
         }
         render();
       });
@@ -2662,7 +2692,7 @@ var SHOP_SPRITE = [
         body += `<div class="member-row">
           <div class="who"><span class="avatar">${p.avatar_emoji}</span>
             <div><div class="name">${escapeHtml(p.name)}</div>
-            <div class="status">${p.role === "banker" ? "Parent" : "Kid"}${p.pin ? " · PIN set" : ""}</div></div>
+            <div class="status">${p.role === "banker" ? "Parent" : "Kid"}${hasPin(p) ? " · PIN set" : ""}</div></div>
           </div>
           <button class="pill-btn small outline" data-edit-member="${p.id}">Edit</button>
         </div>`;
@@ -2971,8 +3001,11 @@ var SHOP_SPRITE = [
       <input type="text" id="eName" value="${escapeHtml(m.name)}" />
       <label class="field-label">Avatar</label>
       <div class="choice-row">${emojis.map(e => `<button class="choice-chip${e === m.avatar_emoji ? " selected" : ""}" data-emoji="${e}">${e}</button>`).join("")}</div>
-      <label class="field-label">PIN (4 digits, leave empty for none)</label>
-      <input type="text" id="ePin" maxlength="4" inputmode="numeric" value="${escapeHtml(m.pin || "")}" />
+      <label class="field-label">${hasPin(m) ? "Change PIN (4 digits, leave empty to keep it)" : "Set a PIN (4 digits, optional)"}</label>
+      <input type="password" id="ePin" maxlength="4" inputmode="numeric" autocomplete="off" placeholder="New PIN" />
+      ${hasPin(m) ? `<label class="field-label">A parent's PIN, to allow the change</label>
+      <input type="password" id="eAuth" maxlength="4" inputmode="numeric" autocomplete="off" />
+      <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:0.85rem;"><input type="checkbox" id="eRemovePin"> Remove this PIN</label>` : ""}
       <button class="primary-btn" id="eSave">Save</button>
     `, (overlay, close) => {
       let chosen = m.avatar_emoji;
@@ -2986,8 +3019,18 @@ var SHOP_SPRITE = [
         const name = nameInput.value.trim();
         if(!name){ markInvalid(nameInput, "Enter a name"); return; }
         const pin = overlay.querySelector("#ePin").value.trim();
+        const authEl = overlay.querySelector("#eAuth"), auth = authEl ? authEl.value.trim() : "";
+        const removeEl = overlay.querySelector("#eRemovePin"), remove = !!(removeEl && removeEl.checked);
         if(pin.length > 0 && pin.length !== 4){ markInvalid(overlay.querySelector("#ePin"), "PIN must be exactly 4 digits"); return; }
-        await supa.from("members").update({ name, avatar_emoji: chosen, pin: pin.length === 4 ? pin : null }).eq("id", m.id);
+        if(hasPin(m) && m.has_pin !== undefined && (pin.length === 4 || remove) && auth.length !== 4){ markInvalid(authEl, "Enter a parent's PIN"); return; }
+        await supa.from("members").update({ name, avatar_emoji: chosen }).eq("id", m.id);
+        let res = { ok: true };
+        if(remove) res = await clearPinFor(m.id, auth);
+        else if(pin.length === 4) res = await setPinFor(m.id, pin, auth);
+        if(!res.ok){
+          showToast(res.error === "bad_pin" ? "That parent PIN didn't match, so the PIN was not changed" : "Couldn't change the PIN");
+          reload(); return;
+        }
         showToast("Saved");
         close(); reload();
       });
