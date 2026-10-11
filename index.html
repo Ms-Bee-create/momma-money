@@ -2097,11 +2097,18 @@ var SHOP_SPRITE = [
       if(btn.dataset.busy) return; btn.dataset.busy = "1";
       btn.classList.add("popped"); btn.textContent = "Sent! ✓";
       const job = (state.homeJobs || []).find(j => j.id === btn.dataset.qdone);
-      setTimeout(() => { if(job) markQuestDone(job); }, 500);
+      if(!job){ showToast("Couldn't find that job — reload the page"); render(); return; }
+      setTimeout(() => markQuestDone(job), 500);
     }));
   }
   async function markQuestDone(job){
     return once("qdone:" + job.id, async () => {
+      try{ await markQuestDoneInner(job); }
+      catch(e){ console.error("markQuestDone", e); showToast("Couldn't save that: " + (e && e.message ? e.message : "unknown error")); render(); }
+    });
+  }
+  async function markQuestDoneInner(job){
+    {
       await syncClock();
       const t = questToday();
       const existing = (state.homeLogs || []).find(l => l.job_id === job.id && l.day === t.iso);
@@ -2114,13 +2121,13 @@ var SHOP_SPRITE = [
         const { data, error } = await supa.from("home_job_logs").insert({
           household_id: userId, member_id: job.member_id, job_id: job.id, day: t.iso, xp: job.xp, status: "submitted"
         }).select();
-        if(error){ showToast("Couldn't save that — try again"); reload(); return; }
+        if(error){ console.error("home_job_logs insert", error); showToast("Couldn't save that: " + (error.message || error.code || "unknown error")); render(); return; }
         log = data && data[0];
       }
       if(log && state.household.home_auto_approve) await approveQuestLog(log, { quiet: true });
       showToast(state.household.home_auto_approve ? "Nice! XP added" : "Marked done — waiting on Mom");
       reload();
-    });
+    }
   }
   // Pays XP into the kid's Home level. A new level pays Momma Money and pops up a celebration (a 🌟 award).
   async function awardHomeXp(memberId, xp, why){
