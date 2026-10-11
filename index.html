@@ -2360,7 +2360,7 @@ var SHOP_SPRITE = [
   }
   function wireChoreCards(){
     app.querySelectorAll(".cc-say").forEach(b => b.addEventListener("click", e => { e.stopPropagation(); speakText(b.dataset.say); }));
-    app.querySelectorAll(".cc-btn").forEach(btn => btn.addEventListener("click", () => {
+    app.querySelectorAll(".cc-btn:not([data-qdone])").forEach(btn => btn.addEventListener("click", () => {
       if(btn.dataset.busy) return;
       btn.dataset.busy = "1";
       btn.classList.add("popped"); btn.textContent = document.body.dataset.kid === "ryan" ? "SENT ✓" : "Sent! ✓";
@@ -2536,7 +2536,8 @@ var SHOP_SPRITE = [
     wireQuest();
     const gq = document.getElementById("gotoQuest");
     if(gq) gq.addEventListener("click", () => { state.kidTab = "quest"; render(); });
-    maybeCelebrate(m, theme);
+    const homeKid = activeMember();
+    if(homeKid) maybeCelebrate(homeKid, kidTheme(homeKid));
   }
 
   // Shared between kid Shop tab wiring — the stepper has no server round
