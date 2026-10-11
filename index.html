@@ -609,17 +609,22 @@
   // tab — no override, so a closed store is really closed. Starting
   // already-banked screen time is unaffected: he can cash in minutes he's
   // already bought whenever he's ready, per the agreed design.
-  function isStoreOpen(){
-    const now = new Date(nowMs());
-    // The Banker can open the shop for the whole day (Manage, Home Quest).
-    if(state.household && state.household.home_gate_open_day === localISO(now)) return true;
+  // Screen time can be BOUGHT any time the shop is unlocked (jobs done), but it can only be USED
+  // during these hours. (This used to be the shop's opening hours; the shop now opens when jobs are done.)
+  function inScreenWindow(now){
     const day = now.getDay(); // 0 Sun .. 6 Sat
     const hour = now.getHours() + now.getMinutes() / 60;
     if(day >= 1 && day <= 5) return hour >= 15 && hour < 17;   // weekdays 3-5pm
-    if(day === 6) return hour >= 9 && hour < 18;                // Saturday 9am-6pm
+    if(day === 6) return hour >= 11 && hour < 18;               // Saturday 11am-6pm
     return hour >= 12 && hour < 17;                             // Sunday 12pm-5pm
   }
-  const STORE_HOURS_TEXT = "Weekdays 3–5pm · Saturdays 9am–6pm · Sundays 12pm–5pm";
+  // The Banker can open screen time and the shop for the whole day (Manage, Home Quest).
+  function isStoreOpen(){
+    const now = new Date(nowMs());
+    if(state.household && state.household.home_gate_open_day === localISO(now)) return true;
+    return inScreenWindow(now);
+  }
+  const STORE_HOURS_TEXT = "Weekdays 3–5pm · Saturdays 11am–6pm · Sundays 12pm–5pm";
 var SHOP_SPRITE = [
 '<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>',
 '<symbol id="pet-uni" viewBox="0 0 230 190">',
@@ -802,11 +807,12 @@ var SHOP_SPRITE = [
   // "Opens in 2 hours" / "Closes in 40 minutes" so a closed store is a plan, not a dead end.
   function storeStatus(){
     const now = new Date(nowMs());
-    const win = d => { const day = d.getDay(); return day >= 1 && day <= 5 ? [15,17] : day === 6 ? [9,18] : [12,17]; };
+    const win = d => { const day = d.getDay(); return day >= 1 && day <= 5 ? [15,17] : day === 6 ? [11,18] : [12,17]; };
     const at = (d, h) => { const x = new Date(d); x.setHours(Math.floor(h), Math.round((h % 1) * 60), 0, 0); return x; };
     const mins = ms => Math.max(1, Math.round(ms / 60000));
     const span = m => { if(m < 60) return m + (m === 1 ? " minute" : " minutes"); const h = Math.round(m / 60); return (m < 90 ? "about " : "about ") + h + (h === 1 ? " hour" : " hours"); };
-    if(isStoreOpen()){ const w = win(now); return {open:true, text:"Closes in " + span(mins(at(now, w[1]) - now))}; }
+    if(inScreenWindow(now)){ const w = win(now); return {open:true, text:"Closes in " + span(mins(at(now, w[1]) - now))}; }
+    if(isStoreOpen()) return {open:true, text:"Open all day today"};
     for(let i = 0; i < 8; i++){
       const d = new Date(now); d.setDate(d.getDate() + i);
       const w = win(d), start = at(d, w[0]);
@@ -886,9 +892,9 @@ var SHOP_SPRITE = [
         <div style="font-size:1.6rem;font-weight:800;">${m.screen_minutes_balance} min</div>
         ${isBanker
           ? `<div style="font-size:0.8rem;color:var(--text-dim);">Not started yet</div>`
-          : (isStoreOpen() && questGate(m).ok
+          : (isStoreOpen()
             ? `<button class="pill-btn" data-start-session="${m.id}" style="margin-top:8px;">▶ Start screen time</button>`
-            : `<div style="font-size:0.82rem;color:var(--text-dim);margin-top:8px;font-weight:700;">${!questGate(m).ok ? "🔒 Finish your Home Quest jobs, then it opens at store hours." : "⏰ Screen time starts when the shop opens: " + escapeHtml(storeStatus().text)}</div>`)}
+            : `<div style="font-size:0.82rem;color:var(--text-dim);margin-top:8px;font-weight:700;">⏰ You can use it at screen time hours: ${escapeHtml(storeStatus().text)}<br><span style="font-weight:600;">${STORE_HOURS_TEXT}</span></div>`)}
       </div>`;
     }
     return "";
@@ -1004,7 +1010,6 @@ var SHOP_SPRITE = [
       await syncClock();
       const m = member(memberId);
       if(m && !questGate(m).ok){ showToast("Finish your Home Quest jobs first"); return; }
-      if(!isStoreOpen()){ showToast("The shop is closed right now"); return; }
       if(m && (m.bankrupt || spendableFor(m) < Number(item.cost))){
         showToast("Not enough in the balance for that yet");
         return;
@@ -1032,7 +1037,6 @@ var SHOP_SPRITE = [
       await syncClock();
       const m = member(memberId);
       if(m && !questGate(m).ok){ showToast("Finish your Home Quest jobs first"); return; }
-      if(!isStoreOpen()){ showToast("The shop is closed right now"); return; }
       const cost = screenTimeCost(minutes);
       if(m && (m.bankrupt || spendableFor(m) < cost)){
         showToast(`Not enough — ${minutes} min costs ${fmt(cost)}`);
@@ -1061,9 +1065,7 @@ var SHOP_SPRITE = [
   async function startScreenSession(memberId){
     return once("start:" + memberId, async () => {
       await syncClock();
-      const mm = member(memberId);
-      if(mm && !questGate(mm).ok){ showToast("Finish your Home Quest jobs first"); return; }
-      if(!isStoreOpen()){ showToast("Screen time opens when the shop opens"); return; }
+      if(!isStoreOpen()){ showToast("Screen time can only be used at screen time hours"); return; }
       // Only one running session per kid, checked against the server (not
       // the in-memory copy) so a second device can't start a parallel one.
       const { data: running } = await supa.from("screen_sessions").select("id")
@@ -1959,16 +1961,18 @@ var SHOP_SPRITE = [
     return (state.homeLogs || []).find(l => l.job_id === job.id && l.day === t.iso) || null;
   }
   // The Shop and starting screen time stay locked until today's morning and after-school jobs are done
-  // (marked done by the kid; the Banker can still send one back). Evening jobs happen after the shop closes,
+  // (approved by the Banker). Evening jobs happen after the shop closes,
   // so they do not hold it back. The Banker can switch the lock off or open the shop for the day.
   function questGate(m){
     const hh = state.household || {};
     const t = questToday();
     const jobs = questJobsFor(m).filter(j => ["morning", "after_school", "weekend"].indexOf(j.slot) >= 0);
-    const remaining = jobs.filter(j => { const l = questLogFor(j); return !(l && (l.status === "submitted" || l.status === "approved")); });
+    // Only jobs the Banker has approved count, so a kid can't unlock the shop by tapping everything.
+    const remaining = jobs.filter(j => { const l = questLogFor(j); return !(l && l.status === "approved"); });
+    const waiting = remaining.filter(j => { const l = questLogFor(j); return l && l.status === "submitted"; }).length;
     const enabled = hh.home_gate !== false;
     const overridden = hh.home_gate_open_day === t.iso;
-    return { enabled, overridden, total: jobs.length, remaining, ok: !enabled || overridden || !jobs.length || !remaining.length };
+    return { enabled, overridden, total: jobs.length, remaining, waiting, ok: !enabled || overridden || !jobs.length || !remaining.length };
   }
   function questCard(job, theme){
     const log = questLogFor(job);
@@ -1997,7 +2001,7 @@ var SHOP_SPRITE = [
     if(!jobs.length) return h + `<div class="empty-note">${theme === "anna" ? "🎉 No jobs today!" : "No home jobs scheduled today."}</div>`;
     const gate = questGate(m);
     if(gate.enabled && !gate.overridden && gate.total){
-      h += `<div class="quest-lock ${gate.ok ? "ok" : ""}">${gate.ok ? "✅ Jobs done! The shop and screen time open at store hours." : "🔒 Finish " + gate.remaining.length + " more job" + (gate.remaining.length === 1 ? "" : "s") + " (morning and after school) to unlock the shop and screen time."}</div>`;
+      h += `<div class="quest-lock ${gate.ok ? "ok" : ""}">${gate.ok ? "✅ Jobs checked! The shop is open. Screen time can be used at screen time hours." : "🔒 " + gate.remaining.length + " job" + (gate.remaining.length === 1 ? "" : "s") + " left (morning and after school)" + (gate.waiting ? " · " + gate.waiting + " waiting for Mom to check" : "") + ". The shop opens when Mom has checked them all."}</div>`;
     }
     h += `<div class="quest-prog">${perfect ? "🌈 Perfect day! +10 XP bonus" : `${done} of ${jobs.length} done today${sent ? " · " + sent + " waiting for Mom" : ""}`}</div>`;
     ["morning", "after_school", "evening", "weekend"].forEach(slot => {
@@ -2128,10 +2132,10 @@ var SHOP_SPRITE = [
         <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:10px;">${auto ? "When a kid taps a job, the XP is added right away." : "When a kid taps a job, it waits in Approvals until you tap ✓."}</div>
         <button class="pill-btn outline" id="questAutoToggle" type="button">${auto ? "Turn approval back on" : "Turn off approval (auto-approve)"}</button>
         <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:12px;">
-          <div style="font-weight:800;margin-bottom:4px;">${state.household.home_gate === false ? "Shop lock is off" : "Shop is locked until jobs are done"}</div>
-          <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:10px;">The Shop and starting screen time unlock when a kid's morning and after-school jobs are done, and then only at store hours.</div>
+          <div style="font-weight:800;margin-bottom:4px;">${state.household.home_gate === false ? "Shop lock is off" : "Shop opens when jobs are approved"}</div>
+          <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:10px;">The Shop opens once you have approved all of a kid's morning and after-school jobs. Kids can buy screen time any time the shop is open, but can only use it at screen time hours (weekdays 3–5pm, Saturdays 11am–6pm, Sundays 12–5pm).</div>
           <button class="pill-btn outline" id="questGateToggle" type="button">${state.household.home_gate === false ? "Turn the lock on" : "Turn the lock off"}</button>
-          <button class="pill-btn outline" id="questOpenToday" type="button" style="margin-left:6px;">${state.household.home_gate_open_day === questToday().iso ? "Close the shop again today" : "Open the shop today anyway"}</button>
+          <button class="pill-btn outline" id="questOpenToday" type="button" style="margin-left:6px;">${state.household.home_gate_open_day === questToday().iso ? "Back to normal today" : "Open the shop and screen time today"}</button>
         </div>
         <div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap;">
           <label style="font-size:0.85rem;">XP per level <input type="number" id="questPer" min="10" step="10" value="${questPerLevel()}" style="width:80px;"></label>
@@ -2316,8 +2320,7 @@ var SHOP_SPRITE = [
     } else if(state.kidTab === "shop"){
       const rate = Number(state.household.screen_time_rate) || 5;
       const gate = questGate(m);
-      const hoursOpen = isStoreOpen();
-      const storeOpen = hoursOpen && gate.ok;
+      const storeOpen = gate.ok;   // the shop opens when the jobs are done (screen time hours only limit USING minutes)
       const spendable = spendableFor(m);
       const pendingScreen = state.txns.some(t => t.member_id === m.id && t.status === "pending" && t.screen_minutes);
       // Cap the stepper at what they can actually pay for (never below 5).
@@ -2325,24 +2328,24 @@ var SHOP_SPRITE = [
       if(state.stMinutes == null || state.stMinutes < 5) state.stMinutes = 15;
       if(state.stMinutes > maxMinutes) state.stMinutes = maxMinutes;
       const canBuy = storeOpen && !m.bankrupt && !pendingScreen && spendable >= screenTimeCost(state.stMinutes);
-      const buyLabel = !gate.ok ? "Finish your jobs first" : !storeOpen ? "Store's closed"
+      const buyLabel = !gate.ok ? "Finish your jobs first"
         : m.bankrupt ? "Bankruptcy protection"
         : pendingScreen ? "Request already waiting"
         : spendable < screenTimeCost(state.stMinutes) ? "Not enough yet"
         : `Request for <span id="stCost">${fmt(screenTimeCost(state.stMinutes))}</span>`;
       const ss = storeStatus();
       const shopTheme = kidTheme(m);
-      body += `<div class="storefront ${ss.open ? "open" : "closed"}">
+      body += `<div class="storefront ${gate.ok ? "open" : "closed"}">
         <div class="awning" aria-hidden="true"></div>
         <div class="sf-body">
           <div class="sf-name">${shopTheme === "ryan" ? "SOFTWARE STORE v1.0" : shopTheme === "anna" ? "🛍️ " + escapeHtml(m.name) + "'s Shop" : "🛍️ The Shop"}</div>
           ${!gate.ok
             ? `<div class="sf-sign">🔒 Locked until your jobs are done</div>
-               <div class="sf-when">${gate.remaining.length} job${gate.remaining.length === 1 ? "" : "s"} to go</div>
+               <div class="sf-when">${gate.remaining.length} job${gate.remaining.length === 1 ? "" : "s"} to go${gate.waiting ? " · " + gate.waiting + " waiting for Mom to check" : ""}</div>
                <button type="button" class="pill-btn" id="gotoQuest" style="margin-top:8px;">Go to Home Quest</button>`
-            : `<div class="sf-sign">${ss.open ? "🟢 We're open!" : "🌙 Closed for now"}</div>
-               <div class="sf-when">${ss.text}</div>`}
-          <div class="sf-hours">${STORE_HOURS_TEXT}</div>
+            : `<div class="sf-sign">🟢 The shop is open!</div>
+               <div class="sf-when">Your jobs are done. Shop away.</div>`}
+          <div class="sf-hours">You can buy screen time any time. You can use it: ${STORE_HOURS_TEXT}</div>
         </div>
       </div>`;
       body += `<div class="cat-label">Buy Screen Time</div>
