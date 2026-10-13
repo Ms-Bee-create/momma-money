@@ -3095,7 +3095,7 @@ var SHOP_SPRITE = [
       <input type="password" id="eAuth" maxlength="4" inputmode="numeric" autocomplete="off" />
       <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:0.85rem;"><input type="checkbox" id="eRemovePin"> Remove this PIN</label>` : ""}
       <button class="primary-btn" id="eSave">Save</button>
-      ${m.role === "banker" && !isOwnerBanker(m) ? `<div class="cat-label" style="margin-top:22px;">Remove this parent profile</div>
+      ${!(m.role === "banker" && isOwnerBanker(m)) ? `<div class="cat-label" style="margin-top:22px;">Remove this ${m.role === "banker" ? "parent" : "kid"} profile</div>
       <label class="field-label">The main parent's PIN</label>
       <input type="password" id="eOwnerPin" maxlength="4" inputmode="numeric" autocomplete="off" />
       <button class="pill-btn outline" id="eRemoveProfile" type="button" style="margin-top:10px;">Remove ${escapeHtml(m.name)}</button>` : ""}
@@ -3107,6 +3107,7 @@ var SHOP_SPRITE = [
         if(ownerEl.value.trim().length !== 4){ markInvalid(ownerEl, "Enter the main parent's PIN"); return; }
         const r = await confirmOwnerPin(ownerEl.value.trim());
         if(!r.ok){ markInvalid(ownerEl, ownerPinProblem(r)); return; }
+        if(m.role === "kid" && !window.confirm("Remove " + m.name + "? Their profile, balance and history will be hidden from the app (not erased).")) return;
         await supa.from("members").update({ archived: true }).eq("id", m.id);
         showToast(m.name + " removed");
         close(); reload();
