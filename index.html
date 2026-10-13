@@ -1388,6 +1388,23 @@ var SHOP_SPRITE = [
     if(r.error){ const u = await supa.from("members").update({ pin: null }).eq("id", memberId); return { ok: !u.error }; }
     return r.data || { ok: false };
   }
+  // Adding or removing people needs the household owner's PIN (the first parent profile). Kids can no longer create profiles.
+  function ownerBanker(){ return state.members.find(x => x.role === "banker") || null; }
+  async function confirmOwnerPin(pin){
+    const owner = ownerBanker();
+    if(!owner) return { ok: false, error: "no_owner" };
+    if(!hasPin(owner)) return { ok: false, error: "no_owner_pin" };
+    if(owner.has_pin === undefined) return { ok: pin === owner.pin };   // server PIN support not installed yet
+    const { data, error } = await supa.rpc("check_member_pin", { p_member: owner.id, p_pin: pin });
+    if(error || !data) return { ok: false, error: "check_failed" };
+    return { ok: !!data.ok, error: data.error, locked: data.locked_seconds > 0 };
+  }
+  function ownerPinProblem(r){
+    if(r.error === "no_owner_pin") return "Set a PIN on your own parent profile first (Edit), so only you can do this";
+    if(r.locked) return "Too many tries. Wait a few minutes";
+    if(r.error === "check_failed") return "Couldn't check the PIN. Try again";
+    return "That isn't the owner parent's PIN";
+  }
   async function addMember(name, role, emoji, pin){
     const { data } = await supa.from("members").insert({ household_id: userId, name, role, avatar_emoji: emoji }).select().single();
     if(pin && data) await setPinFor(data.id, pin, null);
@@ -1715,7 +1732,6 @@ var SHOP_SPRITE = [
         <span class="bal">${k.bankrupt ? "Bankrupt" : fmt(k.current_balance)}</span>
       </button>`;
     });
-    cards += `<button class="add-member-card" id="addMemberBtn">＋<br/>Add family member</button>`;
 
     app.innerHTML = `
       <header class="app-header"><h1>Momma<span class="dot"> $</span></h1></header>
@@ -1731,6 +1747,10 @@ var SHOP_SPRITE = [
     app.querySelectorAll(".profile-card[data-id]").forEach(btn => {
       btn.addEventListener("click", () => {
         const m = member(btn.dataset.id);
+        if(m.role === "banker" && !isOwnerBanker(m) && !hasPin(m)){
+          showToast("This parent profile has no PIN, so it is locked. Ask Mom.");
+          return;
+        }
         if(hasPin(m)){
           state.pinTargetMember = m.id; state.pinBuffer = ""; state.view = "pin";
         } else {
@@ -1739,8 +1759,6 @@ var SHOP_SPRITE = [
         render();
       });
     });
-    const addBtn = document.getElementById("addMemberBtn");
-    if(addBtn) addBtn.addEventListener("click", openAddMemberSheet);
   }
 
   // The server checks the PIN and answers only yes or no. Five wrong tries lock it for 5 minutes.
@@ -2756,7 +2774,10 @@ var SHOP_SPRITE = [
           <button class="pill-btn small outline" data-edit-member="${p.id}">Edit</button>
         </div>`;
       });
-      body += `<button class="pill-btn" id="addParentBtn" style="margin:8px 0 22px;">+ Add a parent (like Dad)</button>`;
+      const meOwner = activeMember();
+      body += (meOwner && meOwner.role === "banker" && isOwnerBanker(meOwner))
+        ? `<button class="pill-btn" id="addParentBtn" style="margin:8px 0 22px;">+ Add a family member</button>`
+        : `<div style="font-size:0.8rem;color:var(--text-dim);margin:8px 0 22px;">Only the main parent can add or remove profiles.</div>`;
 
       const meHere = activeMember();
       body += `<div class="cat-label">This device</div>
@@ -2879,7 +2900,7 @@ var SHOP_SPRITE = [
     // ---- Manage tab: profiles + this device
     app.querySelectorAll("[data-edit-member]").forEach(btn => btn.addEventListener("click", () => openEditMemberSheet(btn.dataset.editMember)));
     const addParentBtn = document.getElementById("addParentBtn");
-    if(addParentBtn) addParentBtn.addEventListener("click", () => openAddMemberSheet("banker"));
+    if(addParentBtn) addParentBtn.addEventListener("click", () => openAddMemberSheet("kid"));
     const deviceMgmt = document.getElementById("deviceProfileMgmt");
     if(deviceMgmt) deviceMgmt.addEventListener("click", () => {
       setDeviceProfile(getDeviceProfile() === state.activeMemberId ? null : state.activeMemberId);
@@ -3023,8 +3044,10 @@ var SHOP_SPRITE = [
       <input type="text" id="mName" placeholder="${startRole === "banker" ? "Dad" : "Sally"}" />
       <label class="field-label">Avatar</label>
       <div class="choice-row">${emojis.map((e,i) => `<button class="choice-chip${i===0?" selected":""}" data-emoji="${e}">${e}</button>`).join("")}</div>
-      <label class="field-label">PIN (optional, 4 digits)</label>
-      <input type="text" id="mPin" maxlength="4" inputmode="numeric" placeholder="e.g. 1234" />
+      <label class="field-label">PIN (4 digits, required for a parent)</label>
+      <input type="password" id="mPin" maxlength="4" inputmode="numeric" autocomplete="off" placeholder="e.g. 1234" />
+      <label class="field-label">Your PIN (the main parent), to allow this</label>
+      <input type="password" id="mAuth" maxlength="4" inputmode="numeric" autocomplete="off" />
       <button class="primary-btn" id="mSave">Add member</button>
     `, (overlay, close) => {
       let chosen = emojis[0], role = startRole;
@@ -3038,12 +3061,17 @@ var SHOP_SPRITE = [
       }));
       const nameInput = overlay.querySelector("#mName");
       nameInput.addEventListener("input", () => clearInvalid(nameInput));
-      overlay.querySelector("#mSave").addEventListener("click", () => {
+      overlay.querySelector("#mSave").addEventListener("click", async () => {
         const name = nameInput.value.trim();
         if(!name){ markInvalid(nameInput, "Enter a name first"); return; }
-        const pin = overlay.querySelector("#mPin").value.trim();
-        if(pin.length > 0 && pin.length !== 4){ markInvalid(overlay.querySelector("#mPin"), "PIN must be exactly 4 digits"); return; }
-        addMember(name, role, chosen, pin.length === 4 ? pin : null);
+        const pinEl = overlay.querySelector("#mPin"), authEl = overlay.querySelector("#mAuth");
+        const pin = pinEl.value.trim(), auth = authEl.value.trim();
+        if(pin.length > 0 && pin.length !== 4){ markInvalid(pinEl, "PIN must be exactly 4 digits"); return; }
+        if(role === "banker" && pin.length !== 4){ markInvalid(pinEl, "A parent profile needs a 4 digit PIN"); return; }
+        if(auth.length !== 4){ markInvalid(authEl, "Enter the main parent's PIN"); return; }
+        const r = await confirmOwnerPin(auth);
+        if(!r.ok){ markInvalid(authEl, ownerPinProblem(r)); return; }
+        await addMember(name, role, chosen, pin.length === 4 ? pin : null);
         close();
       });
     });
@@ -3067,8 +3095,22 @@ var SHOP_SPRITE = [
       <input type="password" id="eAuth" maxlength="4" inputmode="numeric" autocomplete="off" />
       <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:0.85rem;"><input type="checkbox" id="eRemovePin"> Remove this PIN</label>` : ""}
       <button class="primary-btn" id="eSave">Save</button>
+      ${m.role === "banker" && !isOwnerBanker(m) ? `<div class="cat-label" style="margin-top:22px;">Remove this parent profile</div>
+      <label class="field-label">The main parent's PIN</label>
+      <input type="password" id="eOwnerPin" maxlength="4" inputmode="numeric" autocomplete="off" />
+      <button class="pill-btn outline" id="eRemoveProfile" type="button" style="margin-top:10px;">Remove ${escapeHtml(m.name)}</button>` : ""}
     `, (overlay, close) => {
       let chosen = m.avatar_emoji;
+      const rmBtn = overlay.querySelector("#eRemoveProfile");
+      if(rmBtn) rmBtn.addEventListener("click", async () => {
+        const ownerEl = overlay.querySelector("#eOwnerPin");
+        if(ownerEl.value.trim().length !== 4){ markInvalid(ownerEl, "Enter the main parent's PIN"); return; }
+        const r = await confirmOwnerPin(ownerEl.value.trim());
+        if(!r.ok){ markInvalid(ownerEl, ownerPinProblem(r)); return; }
+        await supa.from("members").update({ archived: true }).eq("id", m.id);
+        showToast(m.name + " removed");
+        close(); reload();
+      });
       overlay.querySelectorAll("[data-emoji]").forEach(chip => chip.addEventListener("click", () => {
         overlay.querySelectorAll("[data-emoji]").forEach(c => c.classList.remove("selected"));
         chip.classList.add("selected"); chosen = chip.dataset.emoji;
