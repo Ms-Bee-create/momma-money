@@ -619,11 +619,12 @@
   // during these hours. (This used to be the shop's opening hours; the shop now opens when jobs are done.)
   // Hours are in decimal hours (19.5 = 7:30pm). The Banker can change them in Manage (needs supabase/screen_hours.sql);
   // until then these built-in hours apply. Weekdays start at 7pm so there is a long gap between school and screens.
-  const SCREEN_HOURS_DEFAULT = { wk: [19, 20.5], sat: [11, 18], sun: [12, 17] };
+  const SCREEN_HOURS_DEFAULT = { wk: [19, 20.5], sat: [15, 18], sun: [19, 20.5], cap: 120 };   // cap = most minutes of screen time per kid per day
   function screenHours(){
     const h = (state.household && state.household.screen_hours) || {};
     const ok = a => Array.isArray(a) && a.length === 2 && a[0] >= 0 && a[1] > a[0] && a[1] <= 24;
-    return { wk: ok(h.wk) ? h.wk : SCREEN_HOURS_DEFAULT.wk, sat: ok(h.sat) ? h.sat : SCREEN_HOURS_DEFAULT.sat, sun: ok(h.sun) ? h.sun : SCREEN_HOURS_DEFAULT.sun };
+    return { wk: ok(h.wk) ? h.wk : SCREEN_HOURS_DEFAULT.wk, sat: ok(h.sat) ? h.sat : SCREEN_HOURS_DEFAULT.sat, sun: ok(h.sun) ? h.sun : SCREEN_HOURS_DEFAULT.sun,
+             cap: Number(h.cap) >= 15 ? Number(h.cap) : SCREEN_HOURS_DEFAULT.cap };
   }
   function screenWindowFor(d){
     const day = d.getDay(), h = screenHours();
@@ -640,7 +641,7 @@
   }
   function storeHoursText(){
     const h = screenHours(), f = w => clockText(w[0]) + "–" + clockText(w[1]);
-    return "Weekdays " + f(h.wk) + " · Saturdays " + f(h.sat) + " · Sundays " + f(h.sun);
+    return "Weekdays " + f(h.wk) + " · Saturdays " + f(h.sat) + " · Sundays " + f(h.sun) + " · Most " + (h.cap % 60 === 0 ? (h.cap / 60) + " hour" + (h.cap === 60 ? "" : "s") : h.cap + " min") + " a day";
   }
   // The Banker can open screen time and the shop for the whole day (Manage, Home Quest).
   function isStoreOpen(){
@@ -1098,6 +1099,13 @@ var SHOP_SPRITE = [
         allowed = Math.floor((endD.getTime() - nowD.getTime()) / 60000);
         if(allowed < 1){ showToast("Screen time hours are over for today"); return; }
       }
+      // Daily limit: the most screen minutes a kid can use in one day, counted from today's sessions on the server.
+      const dayStart = new Date(nowD); dayStart.setHours(0, 0, 0, 0);
+      const { data: todays } = await supa.from("screen_sessions").select("minutes").eq("member_id", memberId).gte("started_at", dayStart.toISOString());
+      const usedToday = (todays || []).reduce((n, r) => n + (Number(r.minutes) || 0), 0);
+      const capLeft = screenHours().cap - usedToday;
+      if(capLeft < 1){ showToast("That is today's limit of screen time. Try again tomorrow."); return; }
+      allowed = Math.min(allowed, capLeft);
       // Only one running session per kid, checked against the server (not
       // the in-memory copy) so a second device can't start a parallel one.
       const { data: running } = await supa.from("screen_sessions").select("id")
@@ -1148,6 +1156,8 @@ var SHOP_SPRITE = [
       if(endedAt < endsAtMs){
         // Never give back more than was bought, whatever the clocks say.
         const unused = Math.min(Number(session.minutes) || 0, Math.floor((endsAtMs - endedAt) / 60000));
+        // Record what was really used, so the daily limit counts it correctly.
+        await supa.from("screen_sessions").update({ minutes: Math.max(0, (Number(session.minutes) || 0) - unused), ends_at: new Date(endedAt).toISOString() }).eq("id", sessionId);
         if(unused > 0){
           await adjustMember(session.member_id, cur => ({ screen_minutes_balance: (cur.screen_minutes_balance || 0) + unused }));
           showToast(`Stopped — ${unused} min put back in the bank`);
@@ -1156,6 +1166,7 @@ var SHOP_SPRITE = [
         }
       } else {
         const overtimeMinutes = Math.ceil((endedAt - endsAtMs) / 60000);
+        if(overtimeMinutes > 0) await supa.from("screen_sessions").update({ minutes: (Number(session.minutes) || 0) + overtimeMinutes }).eq("id", sessionId);
         if(overtimeMinutes > 0){
           await chargeOvertimeTomorrow(session.member_id, overtimeMinutes);
           showToast(`Ended — ${overtimeMinutes} min overtime comes off tomorrow's balance`);
@@ -2796,6 +2807,8 @@ var SHOP_SPRITE = [
           <div style="font-size:0.85rem;color:var(--text-dim);margin-bottom:10px;">Kids can buy screen time any time the shop is open, but can only use it between these times. Time left when the window closes stays in their bank.</div>
           ${[["wk", "Weekdays"], ["sat", "Saturdays"], ["sun", "Sundays"]].map(r => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span style="width:84px;font-size:0.85rem;">${r[1]}</span>
             <input type="time" id="sh_${r[0]}_a" value="${hv(sh[r[0]][0])}" /> <span>to</span> <input type="time" id="sh_${r[0]}_b" value="${hv(sh[r[0]][1])}" /></div>`).join("")}
+          <div style="display:flex;align-items:center;gap:8px;margin:4px 0 10px;"><span style="width:84px;font-size:0.85rem;">Daily limit</span>
+            <input type="number" id="sh_cap" min="15" max="480" step="15" value="${sh.cap}" style="width:90px;" /> <span style="font-size:0.85rem;">minutes per kid per day, every day</span></div>
           <button class="pill-btn" id="screenHoursSave" type="button">Save hours</button>
         </div>`;
       body += `<div class="cat-label">Family profiles</div>`;
@@ -2900,6 +2913,9 @@ var SHOP_SPRITE = [
         if(isNaN(a) || isNaN(b) || b <= a){ showToast("Check the times: the end must be after the start"); return; }
         out[k] = [a, b];
       }
+      const cap = parseInt(document.getElementById("sh_cap").value, 10);
+      if(isNaN(cap) || cap < 15 || cap > 480){ showToast("The daily limit should be between 15 and 480 minutes"); return; }
+      out.cap = cap;
       const { error } = await supa.from("households").update({ screen_hours: out }).eq("id", userId);
       if(error){ showToast("Run the screen hours SQL first (screen_hours.sql)"); return; }
       slowCache = null; showToast("Screen time hours saved"); reload();
