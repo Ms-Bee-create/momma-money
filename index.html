@@ -617,12 +617,30 @@
   // already bought whenever he's ready, per the agreed design.
   // Screen time can be BOUGHT any time the shop is unlocked (jobs done), but it can only be USED
   // during these hours. (This used to be the shop's opening hours; the shop now opens when jobs are done.)
+  // Hours are in decimal hours (19.5 = 7:30pm). The Banker can change them in Manage (needs supabase/screen_hours.sql);
+  // until then these built-in hours apply. Weekdays start at 7pm so there is a long gap between school and screens.
+  const SCREEN_HOURS_DEFAULT = { wk: [19, 20.5], sat: [11, 18], sun: [12, 17] };
+  function screenHours(){
+    const h = (state.household && state.household.screen_hours) || {};
+    const ok = a => Array.isArray(a) && a.length === 2 && a[0] >= 0 && a[1] > a[0] && a[1] <= 24;
+    return { wk: ok(h.wk) ? h.wk : SCREEN_HOURS_DEFAULT.wk, sat: ok(h.sat) ? h.sat : SCREEN_HOURS_DEFAULT.sat, sun: ok(h.sun) ? h.sun : SCREEN_HOURS_DEFAULT.sun };
+  }
+  function screenWindowFor(d){
+    const day = d.getDay(), h = screenHours();
+    return day >= 1 && day <= 5 ? h.wk : day === 6 ? h.sat : h.sun;
+  }
   function inScreenWindow(now){
-    const day = now.getDay(); // 0 Sun .. 6 Sat
+    const w = screenWindowFor(now);
     const hour = now.getHours() + now.getMinutes() / 60;
-    if(day >= 1 && day <= 5) return hour >= 15 && hour < 17;   // weekdays 3-5pm
-    if(day === 6) return hour >= 11 && hour < 18;               // Saturday 11am-6pm
-    return hour >= 12 && hour < 17;                             // Sunday 12pm-5pm
+    return hour >= w[0] && hour < w[1];
+  }
+  function clockText(h){
+    const hh = Math.floor(h), mm = Math.round((h - hh) * 60), ap = hh >= 12 ? "pm" : "am", h12 = hh % 12 === 0 ? 12 : hh % 12;
+    return h12 + (mm ? ":" + String(mm).padStart(2, "0") : "") + ap;
+  }
+  function storeHoursText(){
+    const h = screenHours(), f = w => clockText(w[0]) + "–" + clockText(w[1]);
+    return "Weekdays " + f(h.wk) + " · Saturdays " + f(h.sat) + " · Sundays " + f(h.sun);
   }
   // The Banker can open screen time and the shop for the whole day (Manage, Home Quest).
   function isStoreOpen(){
@@ -630,7 +648,6 @@
     if(state.household && state.household.home_gate_open_day === localISO(now)) return true;
     return inScreenWindow(now);
   }
-  const STORE_HOURS_TEXT = "Weekdays 3–5pm · Saturdays 11am–6pm · Sundays 12pm–5pm";
 var SHOP_SPRITE = [
 '<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>',
 '<symbol id="pet-uni" viewBox="0 0 230 190">',
@@ -813,7 +830,7 @@ var SHOP_SPRITE = [
   // "Opens in 2 hours" / "Closes in 40 minutes" so a closed store is a plan, not a dead end.
   function storeStatus(){
     const now = new Date(nowMs());
-    const win = d => { const day = d.getDay(); return day >= 1 && day <= 5 ? [15,17] : day === 6 ? [11,18] : [12,17]; };
+    const win = d => screenWindowFor(d);
     const at = (d, h) => { const x = new Date(d); x.setHours(Math.floor(h), Math.round((h % 1) * 60), 0, 0); return x; };
     const mins = ms => Math.max(1, Math.round(ms / 60000));
     const span = m => { if(m < 60) return m + (m === 1 ? " minute" : " minutes"); const h = Math.round(m / 60); return (m < 90 ? "about " : "about ") + h + (h === 1 ? " hour" : " hours"); };
@@ -900,7 +917,7 @@ var SHOP_SPRITE = [
           ? `<div style="font-size:0.8rem;color:var(--text-dim);">Not started yet</div>`
           : (isStoreOpen()
             ? `<button class="pill-btn" data-start-session="${m.id}" style="margin-top:8px;">▶ Start screen time</button>`
-            : `<div style="font-size:0.82rem;color:var(--text-dim);margin-top:8px;font-weight:700;">⏰ You can use it at screen time hours: ${escapeHtml(storeStatus().text)}<br><span style="font-weight:600;">${STORE_HOURS_TEXT}</span></div>`)}
+            : `<div style="font-size:0.82rem;color:var(--text-dim);margin-top:8px;font-weight:700;">⏰ You can use it at screen time hours: ${escapeHtml(storeStatus().text)}<br><span style="font-weight:600;">${storeHoursText()}</span></div>`)}
       </div>`;
     }
     return "";
@@ -1072,6 +1089,15 @@ var SHOP_SPRITE = [
     return once("start:" + memberId, async () => {
       await syncClock();
       if(!isStoreOpen()){ showToast("Screen time can only be used at screen time hours"); return; }
+      // Time can only run until the window closes (unless the Banker opened the whole day); the rest stays in the bank.
+      let allowed = Infinity;
+      const nowD = new Date(nowMs());
+      if(!(state.household && state.household.home_gate_open_day === localISO(nowD)) && inScreenWindow(nowD)){
+        const w = screenWindowFor(nowD);
+        const endD = new Date(nowD); endD.setHours(Math.floor(w[1]), Math.round((w[1] % 1) * 60), 0, 0);
+        allowed = Math.floor((endD.getTime() - nowD.getTime()) / 60000);
+        if(allowed < 1){ showToast("Screen time hours are over for today"); return; }
+      }
       // Only one running session per kid, checked against the server (not
       // the in-memory copy) so a second device can't start a parallel one.
       const { data: running } = await supa.from("screen_sessions").select("id")
@@ -1080,8 +1106,8 @@ var SHOP_SPRITE = [
       // Zero the bank first and use what was actually in it. Whoever gets
       // here first takes the minutes; a double-tap finds an empty bank.
       const taken = await adjustMember(memberId, cur =>
-        (cur.screen_minutes_balance || 0) > 0 ? { screen_minutes_balance: 0 } : null);
-      const minutes = taken && !taken.unchanged ? (taken.before.screen_minutes_balance || 0) : 0;
+        (cur.screen_minutes_balance || 0) > 0 ? { screen_minutes_balance: (cur.screen_minutes_balance || 0) - Math.min(cur.screen_minutes_balance || 0, allowed) } : null);
+      const minutes = taken && !taken.unchanged ? Math.min(taken.before.screen_minutes_balance || 0, allowed) : 0;
       if(minutes <= 0){ reload(); return; }
       await syncClock();
       const startedAt = new Date(nowMs());
@@ -2451,7 +2477,7 @@ var SHOP_SPRITE = [
                <button type="button" class="pill-btn" id="gotoQuest" style="margin-top:8px;">Go to Home Quest</button>`
             : `<div class="sf-sign">🟢 The shop is open!</div>
                <div class="sf-when">Your jobs are done. Shop away.</div>`}
-          <div class="sf-hours">You can buy screen time any time. You can use it: ${STORE_HOURS_TEXT}</div>
+          <div class="sf-hours">You can buy screen time any time. You can use it: ${storeHoursText()}</div>
         </div>
       </div>`;
       body += `<div class="cat-label">Buy Screen Time</div>
@@ -2764,6 +2790,14 @@ var SHOP_SPRITE = [
           </div>
         </div>`;
 
+      const sh = screenHours(), hv = h => { const hh = Math.floor(h), mm = Math.round((h - hh) * 60); return String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0"); };
+      body += `<div class="cat-label">Screen Time Hours</div>
+        <div class="card">
+          <div style="font-size:0.85rem;color:var(--text-dim);margin-bottom:10px;">Kids can buy screen time any time the shop is open, but can only use it between these times. Time left when the window closes stays in their bank.</div>
+          ${[["wk", "Weekdays"], ["sat", "Saturdays"], ["sun", "Sundays"]].map(r => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span style="width:84px;font-size:0.85rem;">${r[1]}</span>
+            <input type="time" id="sh_${r[0]}_a" value="${hv(sh[r[0]][0])}" /> <span>to</span> <input type="time" id="sh_${r[0]}_b" value="${hv(sh[r[0]][1])}" /></div>`).join("")}
+          <button class="pill-btn" id="screenHoursSave" type="button">Save hours</button>
+        </div>`;
       body += `<div class="cat-label">Family profiles</div>`;
       state.members.forEach(p => {
         body += `<div class="member-row">
@@ -2857,6 +2891,19 @@ var SHOP_SPRITE = [
     app.querySelectorAll("[data-end-session]").forEach(btn => btn.addEventListener("click", () => {
       if(confirm("Stop this screen time session now?")) finishScreenSession(btn.dataset.endSession);
     }));
+    const shSave = document.getElementById("screenHoursSave");
+    if(shSave) shSave.addEventListener("click", async () => {
+      const get = id => { const v = (document.getElementById(id).value || "").split(":"); return parseInt(v[0], 10) + (parseInt(v[1], 10) || 0) / 60; };
+      const out = {};
+      for(const k of ["wk", "sat", "sun"]){
+        const a = get("sh_" + k + "_a"), b = get("sh_" + k + "_b");
+        if(isNaN(a) || isNaN(b) || b <= a){ showToast("Check the times: the end must be after the start"); return; }
+        out[k] = [a, b];
+      }
+      const { error } = await supa.from("households").update({ screen_hours: out }).eq("id", userId);
+      if(error){ showToast("Run the screen hours SQL first (screen_hours.sql)"); return; }
+      slowCache = null; showToast("Screen time hours saved"); reload();
+    });
     const rateSaveBtn = document.getElementById("rateSave");
     if(rateSaveBtn) rateSaveBtn.addEventListener("click", () => {
       const rate = parseFloat(document.getElementById("rateInput").value);
