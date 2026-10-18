@@ -1042,11 +1042,15 @@ var SHOP_SPRITE = [
         showToast(`"${item.title}" is already waiting on the Banker`);
         return;
       }
-      await supa.from("transactions").insert({
+      // Store purchases go through on their own. Only screen time still waits for the Banker
+      // (that is requestScreenTime). Items that need a grown-up to do something show up on the Banker's
+      // Approvals tab under "To do for the kids".
+      const ins = await supa.from("transactions").insert({
         household_id: userId, member_id: memberId, type: "spend",
         amount: -Math.abs(item.cost), description: item.title, status: "pending", reward_item_id: item.id
-      });
-      showToast(`Requested "${item.title}" — waiting on the Banker`);
+      }).select().maybeSingle();
+      const done = ins && ins.data ? await approveTransaction(ins.data, { quiet: true }) : null;
+      showToast(done ? (rewardNeedsMom(item) ? `Bought "${item.title}" — Mom will be told` : `Bought "${item.title}"!`) : `Requested "${item.title}" — waiting on the Banker`);
       reload();
     });
   }
@@ -1488,8 +1492,17 @@ var SHOP_SPRITE = [
   // manually reload the page — but skips a beat while a sheet is open or
   // someone's mid-typing, so it never yanks focus out from under them.
   // How many things are waiting for a parent: purchase/chore requests plus Home Quest jobs.
+  // Digital goodies (pets, accessories) need nothing from Mom. Everything else she may have to hand over or do.
+  function rewardNeedsMom(r){ return !!r && r.category !== "Pets & Accessories" && !r.grants; }
+  function todoDoneIds(){ try{ return JSON.parse(localStorage.getItem("mm_todo_done") || "[]"); }catch(e){ return []; } }
+  function todoTxns(){
+    const done = todoDoneIds(), cutoff = Date.now() - 7*86400000;
+    return (state.txns || []).filter(t => t.status === "approved" && t.type === "spend" && t.reward_item_id && !t.screen_minutes
+      && new Date(t.created_at).getTime() > cutoff && done.indexOf(t.id) < 0
+      && rewardNeedsMom((state.rewards || []).find(r => r.id === t.reward_item_id)));
+  }
   function pendingApprovalCount(){
-    return (state.txns || []).filter(t => t.status === "pending").length
+    return todoTxns().length + (state.txns || []).filter(t => t.status === "pending").length
       + (state.homeLogs || []).filter(l => l.status === "submitted" && l.job_id).length;
   }
   // The tab title and the home-screen icon show the count, so a parent sees it without opening the app.
@@ -2706,8 +2719,17 @@ var SHOP_SPRITE = [
       body = renderQuickBody(activeMember());
     } else if(state.kidTab === "approvals"){
       body = questApprovalsHtml();
-      if(!pendingTxns.length && !body) body = `<div class="empty-note">All caught up — nothing waiting on approval.</div>`;
-      else if(body && pendingTxns.length) body += `<div class="cat-label">Purchases and chores</div>`;
+      if(!pendingTxns.length && !body && !todoTxns().length) body = `<div class="empty-note">All caught up — nothing waiting on approval.</div>`;
+      const todos = todoTxns();
+      if(todos.length){
+        body += `<div class="cat-label">To do for the kids</div>` + todos.map(t => {
+          const m = member(t.member_id);
+          return `<div class="item-row"><div><div class="title">${escapeHtml(m ? m.name : "?")} bought ${escapeHtml(t.description)}</div>
+            <div class="sub">Needs you · ${new Date(t.created_at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}</div></div>
+            <button class="pill-btn small" data-todo-done="${t.id}">Done ✓</button></div>`;
+        }).join("");
+      }
+      if(body && pendingTxns.length) body += `<div class="cat-label">Purchases and chores</div>`;
       pendingTxns.forEach(t => {
         const m = member(t.member_id);
         const dupCount = pendingTxns.filter(o => o.member_id === t.member_id && o.description === t.description).length;
@@ -2870,7 +2892,7 @@ var SHOP_SPRITE = [
       ${(pendingApprovalCount() && state.kidTab !== "approvals") ? `<button type="button" class="wait-banner" data-tab="approvals">🔔 ${pendingApprovalCount()} waiting for you · tap to review</button>` : ""}
       <div class="tab-row">
         <button class="tab-btn ${state.kidTab==="quick"?"active":""}" data-tab="quick">⚡ Quick</button>
-        <button class="tab-btn ${state.kidTab==="approvals"?"active":""}" data-tab="approvals">Approvals${(pendingTxns.length + (state.homeLogs || []).filter(l => l.status === "submitted" && l.job_id).length) ? ` (${pendingTxns.length + (state.homeLogs || []).filter(l => l.status === "submitted" && l.job_id).length})` : ""}</button>
+        <button class="tab-btn ${state.kidTab==="approvals"?"active":""}" data-tab="approvals">Approvals${(pendingApprovalCount()) ? ` (${pendingApprovalCount()})` : ""}</button>
         <button class="tab-btn ${state.kidTab==="household"?"active":""}" data-tab="household">Household</button>
         <button class="tab-btn ${state.kidTab==="history"?"active":""}" data-tab="history">History</button>
         <button class="tab-btn ${state.kidTab==="manage"?"active":""}" data-tab="manage">Manage</button>
@@ -2884,6 +2906,10 @@ var SHOP_SPRITE = [
   function wireBankerDesk(){
     document.getElementById("switchProfileBtn").addEventListener("click", () => { state.view = "picker"; render(); });
     app.querySelectorAll("[data-tab]").forEach(btn => btn.addEventListener("click", () => { state.kidTab = btn.dataset.tab; render(); }));
+    app.querySelectorAll("[data-todo-done]").forEach(btn => btn.addEventListener("click", () => {
+      try{ const d = todoDoneIds(); d.push(btn.dataset.todoDone); localStorage.setItem("mm_todo_done", JSON.stringify(d)); }catch(e){}
+      render();
+    }));
     app.querySelectorAll("[data-approve]").forEach(btn => btn.addEventListener("click", () => {
       approveTransaction(state.txns.find(t => t.id === btn.dataset.approve));
     }));
