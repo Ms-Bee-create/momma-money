@@ -2725,7 +2725,7 @@ var SHOP_SPRITE = [
         body += `<div class="cat-label">To do for the kids</div>` + todos.map(t => {
           const m = member(t.member_id);
           return `<div class="item-row"><div><div class="title">${escapeHtml(m ? m.name : "?")} bought ${escapeHtml(t.description)}</div>
-            <div class="sub">Needs you · ${new Date(t.created_at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}</div></div></div>
+            <div class="sub">Needs you · ${new Date(t.created_at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}</div></div>
             <button class="pill-btn small" data-todo-done="${t.id}">Done ✓</button></div>`;
         }).join("");
       }
